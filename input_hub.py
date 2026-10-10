@@ -121,10 +121,36 @@ def toggle_suppression(enabled: bool) -> None:
             pass
 
 
+def _normalize_stick_axis(value: int, abs_info: Any = None) -> float:
+    if abs_info is not None and getattr(abs_info, "max", 0) > getattr(abs_info, "min", 0):
+        center = (abs_info.max + abs_info.min) / 2.0
+        half_range = (abs_info.max - abs_info.min) / 2.0
+        norm = (value - center) / half_range
+    else:
+        norm = value / 32767.0
+
+    norm = max(-1.0, min(1.0, norm))
+    DEADZONE = 0.12
+    if abs(norm) < DEADZONE:
+        return 0.0
+    sign = 1.0 if norm > 0 else -1.0
+    return sign * ((abs(norm) - DEADZONE) / (1.0 - DEADZONE))
+
+
 async def _read_device(device: InputDevice[str]) -> None:
     from state import state
     axis_states: dict[int, int] = {}
     THRESHOLD = 16000
+
+    abs_dict: dict[int, Any] = {}
+    try:
+        caps = device.capabilities()
+        if ecodes.EV_ABS in caps:
+            for item in caps[ecodes.EV_ABS]:
+                if isinstance(item, tuple) and len(item) == 2:
+                    abs_dict[item[0]] = item[1]
+    except Exception:
+        pass
 
     try:
         async for event in device.async_read_loop():
@@ -147,6 +173,12 @@ async def _read_device(device: InputDevice[str]) -> None:
                 old_val = axis_states.get(event.code, 0)
                 if abs(event.value - old_val) > 10: # Small noise gate
                     _fire_callbacks(event, f"ABS_{event.code}={event.value}", device.name)
+
+                # Track continuous analog Right Stick for mouse cursor movement
+                if event.code == ecodes.ABS_RX:
+                    state["right_stick_x"] = _normalize_stick_axis(event.value, abs_dict.get(ecodes.ABS_RX))
+                elif event.code == ecodes.ABS_RY:
+                    state["right_stick_y"] = _normalize_stick_axis(event.value, abs_dict.get(ecodes.ABS_RY))
 
                 # Handle DPAD (Hats)
                 if event.code == ecodes.ABS_HAT0X:

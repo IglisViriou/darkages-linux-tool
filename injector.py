@@ -132,3 +132,26 @@ async def mouse_click(button: int, x: int | None = None, y: int | None = None) -
         )
         await proc.wait()
 
+
+async def mouse_move_relative(dx: int, dy: int) -> None:
+    if dx == 0 and dy == 0:
+        return
+
+    # Try using virtual input (uinput) first for high performance and low latency
+    if input_hub._uinput is not None:
+        try:
+            input_hub._uinput.write(ecodes.EV_REL, ecodes.REL_X, dx)
+            input_hub._uinput.write(ecodes.EV_REL, ecodes.REL_Y, dy)
+            input_hub._uinput.syn()
+            return
+        except Exception:
+            pass
+
+    # Fallback to xdotool
+    proc = await asyncio.create_subprocess_exec(
+        "xdotool", "mousemove_relative", "--", str(dx), str(dy),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL
+    )
+    await proc.wait()
+

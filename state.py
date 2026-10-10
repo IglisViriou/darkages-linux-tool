@@ -20,8 +20,17 @@ def save_config() -> None:
         config = {
             "window_hooks": state["window_hooks"],
             "zxcv_enabled": state["zxcv_enabled"],
+            "controller_enabled": state["controller_enabled"],
             "dpad_enabled": state["dpad_enabled"],
+            "joystick_enabled": state["joystick_enabled"],
+            "right_stick_mouse_enabled": state["right_stick_mouse_enabled"],
+            "mouse_sensitivity": state["mouse_sensitivity"],
+            "mouse_dpi": state["mouse_dpi"],
             "space_enabled": state["space_enabled"],
+            "space_multiplier": state["space_multiplier"],
+            "butterwalk_hotkey": state["butterwalk_hotkey"],
+            "controller_hotkey": state["controller_hotkey"],
+            "space_hotkey": state["space_hotkey"],
             "suppress_triggers": state["suppress_triggers"],
             "multiplier": state["multiplier"]
         }
@@ -71,8 +80,18 @@ class State(TypedDict):
     multiplier: int
     physical_keys_down: set[str]
     zxcv_enabled: bool
+    # controller inputs
+    controller_enabled: bool
     dpad_enabled: bool
+    joystick_enabled: bool
+    right_stick_mouse_enabled: bool
+    mouse_sensitivity: int
+    mouse_dpi: int
+    right_stick_x: float
+    right_stick_y: float
+    # spacebar uninterrupted repeat
     space_enabled: bool
+    space_multiplier: int
     # macros
     macros: list[Macro]
     macro_playing: set[str]
@@ -86,6 +105,12 @@ class State(TypedDict):
     captured_trigger: str | None
     # suppression
     suppress_triggers: bool
+    # hotkeys
+    butterwalk_hotkey: str
+    controller_hotkey: str
+    space_hotkey: str
+    listening_for_hotkey: str | None
+    captured_hotkey: tuple[str, str] | None
 
 
 loaded_config = load_config()
@@ -100,8 +125,21 @@ state: State = {
     "multiplier": loaded_config.get("multiplier", int(os.getenv("DEFAULT_MULTIPLIER") or DEFAULT_MULTIPLIER)),
     "physical_keys_down": set(),
     "zxcv_enabled": loaded_config.get("zxcv_enabled", False),
+    "controller_enabled": loaded_config.get("controller_enabled", True),
     "dpad_enabled": loaded_config.get("dpad_enabled", False),
+    "joystick_enabled": loaded_config.get("joystick_enabled", True),
+    "right_stick_mouse_enabled": loaded_config.get("right_stick_mouse_enabled", False),
+    "mouse_sensitivity": loaded_config.get("mouse_sensitivity", 50),
+    "mouse_dpi": loaded_config.get("mouse_dpi", 1600),
+    "right_stick_x": 0.0,
+    "right_stick_y": 0.0,
     "space_enabled": loaded_config.get("space_enabled", False),
+    "space_multiplier": loaded_config.get("space_multiplier", 1),
+    "butterwalk_hotkey": loaded_config.get("butterwalk_hotkey", "ctrl + del"),
+    "controller_hotkey": loaded_config.get("controller_hotkey", "ctrl + pgup"),
+    "space_hotkey": loaded_config.get("space_hotkey", "ctrl + pgdn"),
+    "listening_for_hotkey": None,
+    "captured_hotkey": None,
     "macros": [],
     "macro_playing": set(),
     "active_macro_tasks": {},

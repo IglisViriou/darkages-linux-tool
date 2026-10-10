@@ -11,7 +11,7 @@ import locale
 import argparse
 from state import state
 import input_hub
-from features import butterwalk
+from features import butterwalk, spacebar, controller, hotkeys
 from features.macro import MacroFeature, load_macros
 from ui.tabs import draw_ui
 from ui import theme
@@ -54,12 +54,15 @@ async def focus_monitor() -> None:
 async def main_async(macro_feature: MacroFeature) -> None:
     input_hub.setup_devices()
     input_hub.register(butterwalk.on_key_event)
+    input_hub.register(hotkeys.on_key_event)
     input_hub.register(macro_feature.on_key_event)
 
     tasks: list[asyncio.Future[Any] | Coroutine[Any, Any, Any]] = list(
         input_hub.get_read_tasks()
     )
     tasks.append(butterwalk.injection_loop())
+    tasks.append(spacebar.injection_loop())
+    tasks.append(controller.injection_loop())
     tasks.append(macro_feature.hold_loop())
     tasks.append(focus_monitor())
     _ = await asyncio.gather(*tasks)

@@ -6,7 +6,6 @@ import injector
 
 
 KEY_MAP: dict[str, str] = {
-    "KEY_SPACE": "space",
     "KEY_LEFT": "Left",
     "KEY_RIGHT": "Right",
     "KEY_UP": "Up",
@@ -15,16 +14,6 @@ KEY_MAP: dict[str, str] = {
     "KEY_X": "Down",
     "KEY_C": "Up",
     "KEY_V": "Right",
-    # DPAD
-    "BTN_DPAD_LEFT": "Left",
-    "BTN_DPAD_RIGHT": "Right",
-    "BTN_DPAD_UP": "Up",
-    "BTN_DPAD_DOWN": "Down",
-    # Joysticks (Virtual Buttons)
-    "BTN_JOY_LX_NEG": "Left",
-    "BTN_JOY_LX_POS": "Right",
-    "BTN_JOY_LY_NEG": "Up",
-    "BTN_JOY_LY_POS": "Down",
 }
 
 
@@ -46,21 +35,11 @@ async def injection_loop() -> None:
         if state["butterwalk"] and state["active"] and state["physical_keys_down"]:
             active_targets: set[str] = set()
             for k in state["physical_keys_down"]:
-                # Check physical arrow/zxcv/dpad/joystick keys
+                # Check physical arrow/zxcv keys
                 if k in KEY_MAP:
                     if (
                         k in ("KEY_Z", "KEY_X", "KEY_C", "KEY_V")
                         and not state["zxcv_enabled"]
-                    ):
-                        continue
-                    if (
-                        k.startswith("BTN_DPAD_")
-                        and not state["dpad_enabled"]
-                    ):
-                        continue
-                    if (
-                        k == "KEY_SPACE"
-                        and not state["space_enabled"]
                     ):
                         continue
                     active_targets.add(KEY_MAP[k])
@@ -75,9 +54,6 @@ async def injection_loop() -> None:
                         if macro["steps"]:
                             val = macro["steps"][0]["value"]
                             valid_targets = ["Left", "Right", "Up", "Down"]
-                            if state["space_enabled"]:
-                                valid_targets.append("space")
-                            
                             if val in valid_targets:
                                 active_targets.add(val)
 

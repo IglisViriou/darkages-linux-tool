@@ -398,7 +398,7 @@ class DarkAgesApp(ctk.CTk):
         # Sidebar / Navigation
         self.navigation_frame = ctk.CTkFrame(self, corner_radius=0)
         self.navigation_frame.grid(row=0, column=0, sticky="nsew")
-        self.navigation_frame.grid_rowconfigure(4, weight=1)
+        self.navigation_frame.grid_rowconfigure(6, weight=1)
 
         self.navigation_frame_label = ctk.CTkLabel(self.navigation_frame, text="DarkAges Linux Tool", 
                                                  font=ctk.CTkFont(size=15, weight="bold"))
@@ -414,21 +414,37 @@ class DarkAgesApp(ctk.CTk):
                                               anchor="w", command=self.butterwalk_button_event)
         self.butterwalk_button.grid(row=2, column=0, sticky="ew")
 
+        self.spacebar_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Spacebar Uninterrupted Repeat",
+                                             fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+                                             anchor="w", command=self.spacebar_button_event)
+        self.spacebar_button.grid(row=3, column=0, sticky="ew")
+
+        self.controller_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Controller Inputs",
+                                              fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+                                              anchor="w", command=self.controller_button_event)
+        self.controller_button.grid(row=4, column=0, sticky="ew")
+
         self.macro_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Macros",
                                          fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
                                          anchor="w", command=self.macro_button_event)
-        self.macro_button.grid(row=3, column=0, sticky="ew")
+        self.macro_button.grid(row=5, column=0, sticky="ew")
 
         # Create frames
         self.home_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
         self.butterwalk_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
+        self.spacebar_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
+        self.controller_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
         self.macro_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         
         enable_linux_scroll(self.home_frame)
         enable_linux_scroll(self.butterwalk_frame)
+        enable_linux_scroll(self.spacebar_frame)
+        enable_linux_scroll(self.controller_frame)
 
         self._setup_home_frame()
         self._setup_butterwalk_frame()
+        self._setup_spacebar_frame()
+        self._setup_controller_frame()
         self._setup_macro_frame()
 
         # Select default frame
@@ -528,33 +544,152 @@ class DarkAgesApp(ctk.CTk):
 
     def _setup_butterwalk_frame(self):
         self.bw_title = ctk.CTkLabel(self.butterwalk_frame, text="Butterwalk Settings", font=ctk.CTkFont(size=24, weight="bold"))
-        self.bw_title.pack(padx=20, pady=30)
+        self.bw_title.pack(padx=20, pady=(20, 10))
 
         self.bw_switch = ctk.CTkSwitch(self.butterwalk_frame, text="Enable Butterwalk", command=self.toggle_bw)
-        self.bw_switch.pack(padx=20, pady=10)
+        self.bw_switch.pack(padx=20, pady=8)
         if state["butterwalk"]: self.bw_switch.select()
 
         self.zxcv_switch = ctk.CTkSwitch(self.butterwalk_frame, text="Enable ZXCV Mapping", command=self.toggle_zxcv)
-        self.zxcv_switch.pack(padx=20, pady=10)
+        self.zxcv_switch.pack(padx=20, pady=8)
         if state["zxcv_enabled"]: self.zxcv_switch.select()
 
-        self.dpad_switch = ctk.CTkSwitch(self.butterwalk_frame, text="Enable DPAD Mapping", command=self.toggle_dpad)
-        self.dpad_switch.pack(padx=20, pady=10)
-        if state["dpad_enabled"]: self.dpad_switch.select()
-
-        self.space_switch = ctk.CTkSwitch(self.butterwalk_frame, text="Enable SPACE Mapping", command=self.toggle_space)
-        self.space_switch.pack(padx=20, pady=10)
-        if state["space_enabled"]: self.space_switch.select()
+        # Toggle Hotkey
+        bw_hotkey_frame = ctk.CTkFrame(self.butterwalk_frame, fg_color="transparent")
+        bw_hotkey_frame.pack(padx=20, pady=10)
+        ctk.CTkLabel(bw_hotkey_frame, text="Toggle Hotkey:", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left", padx=5)
+        self.bw_hotkey_entry = ctk.CTkEntry(bw_hotkey_frame, width=140)
+        self.bw_hotkey_entry.insert(0, state["butterwalk_hotkey"])
+        self.bw_hotkey_entry.pack(side="left", padx=5)
+        self.bw_hotkey_entry.bind("<Return>", lambda e: self.apply_bw_hotkey())
+        self.bw_hotkey_apply_btn = ctk.CTkButton(bw_hotkey_frame, text="Apply", width=60, command=self.apply_bw_hotkey)
+        self.bw_hotkey_apply_btn.pack(side="left", padx=5)
+        self.bw_hotkey_bind_btn = ctk.CTkButton(bw_hotkey_frame, text="Record", width=70, fg_color="orange", text_color="black", hover_color="#CC8800", command=lambda: self.start_hotkey_binding("butterwalk"))
+        self.bw_hotkey_bind_btn.pack(side="left", padx=5)
 
         self.multiplier_label = ctk.CTkLabel(self.butterwalk_frame, text=f"Multiplier: {state['multiplier']}x", font=ctk.CTkFont(size=16, weight="bold"))
-        self.multiplier_label.pack(padx=20, pady=(30, 0))
+        self.multiplier_label.pack(padx=20, pady=(15, 0))
         
         self.multiplier_slider = ctk.CTkSlider(self.butterwalk_frame, from_=1, to=5, number_of_steps=4, command=self.set_multiplier)
         self.multiplier_slider.set(state["multiplier"])
         self.multiplier_slider.pack(padx=20, pady=10, fill="x")
 
         self.input_display_label = ctk.CTkLabel(self.butterwalk_frame, text="Keys Pressed: —", font=ctk.CTkFont(family="monospace", size=14))
-        self.input_display_label.pack(padx=20, pady=40)
+        self.input_display_label.pack(padx=20, pady=(20, 10))
+
+    def _setup_spacebar_frame(self):
+        self.space_title = ctk.CTkLabel(self.spacebar_frame, text="Spacebar Uninterrupted Repeat", font=ctk.CTkFont(size=24, weight="bold"))
+        self.space_title.pack(padx=20, pady=(20, 10))
+
+        self.space_desc = ctk.CTkLabel(
+            self.spacebar_frame,
+            text="Continuously repeats Spacebar inputs while held down, even during macro execution.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.space_desc.pack(padx=20, pady=(0, 15))
+
+        self.space_switch = ctk.CTkSwitch(self.spacebar_frame, text="Enable Spacebar Uninterrupted Repeat", command=self.toggle_space)
+        self.space_switch.pack(padx=20, pady=8)
+        if state["space_enabled"]: self.space_switch.select()
+
+        # Toggle Hotkey
+        space_hotkey_frame = ctk.CTkFrame(self.spacebar_frame, fg_color="transparent")
+        space_hotkey_frame.pack(padx=20, pady=10)
+        ctk.CTkLabel(space_hotkey_frame, text="Toggle Hotkey:", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left", padx=5)
+        self.space_hotkey_entry = ctk.CTkEntry(space_hotkey_frame, width=140)
+        self.space_hotkey_entry.insert(0, state["space_hotkey"])
+        self.space_hotkey_entry.pack(side="left", padx=5)
+        self.space_hotkey_entry.bind("<Return>", lambda e: self.apply_space_hotkey())
+        self.space_hotkey_apply_btn = ctk.CTkButton(space_hotkey_frame, text="Apply", width=60, command=self.apply_space_hotkey)
+        self.space_hotkey_apply_btn.pack(side="left", padx=5)
+        self.space_hotkey_bind_btn = ctk.CTkButton(space_hotkey_frame, text="Record", width=70, fg_color="orange", text_color="black", hover_color="#CC8800", command=lambda: self.start_hotkey_binding("space"))
+        self.space_hotkey_bind_btn.pack(side="left", padx=5)
+
+        self.space_multiplier_label = ctk.CTkLabel(self.spacebar_frame, text=f"Repeat Multiplier: {state['space_multiplier']}x", font=ctk.CTkFont(size=16, weight="bold"))
+        self.space_multiplier_label.pack(padx=20, pady=(15, 0))
+        
+        self.space_multiplier_slider = ctk.CTkSlider(self.spacebar_frame, from_=1, to=5, number_of_steps=4, command=self.set_space_multiplier)
+        self.space_multiplier_slider.set(state["space_multiplier"])
+        self.space_multiplier_slider.pack(padx=20, pady=10, fill="x")
+
+        self.space_input_display_label = ctk.CTkLabel(self.spacebar_frame, text="Keys Pressed: —", font=ctk.CTkFont(family="monospace", size=14))
+        self.space_input_display_label.pack(padx=20, pady=(20, 10))
+
+    def _setup_controller_frame(self):
+        self.ctrl_title = ctk.CTkLabel(self.controller_frame, text="Controller Inputs", font=ctk.CTkFont(size=24, weight="bold"))
+        self.ctrl_title.pack(padx=20, pady=(20, 10))
+
+        self.ctrl_desc = ctk.CTkLabel(
+            self.controller_frame,
+            text="Map gamepad DPAD, thumbsticks, and right stick mouse cursor movement.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.ctrl_desc.pack(padx=20, pady=(0, 15))
+
+        self.controller_switch = ctk.CTkSwitch(self.controller_frame, text="Enable Controller Mapping", command=self.toggle_controller)
+        self.controller_switch.pack(padx=20, pady=6)
+        if state["controller_enabled"]: self.controller_switch.select()
+
+        # Toggle Hotkey
+        ctrl_hotkey_frame = ctk.CTkFrame(self.controller_frame, fg_color="transparent")
+        ctrl_hotkey_frame.pack(padx=20, pady=8)
+        ctk.CTkLabel(ctrl_hotkey_frame, text="Toggle Hotkey:", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left", padx=5)
+        self.ctrl_hotkey_entry = ctk.CTkEntry(ctrl_hotkey_frame, width=140)
+        self.ctrl_hotkey_entry.insert(0, state["controller_hotkey"])
+        self.ctrl_hotkey_entry.pack(side="left", padx=5)
+        self.ctrl_hotkey_entry.bind("<Return>", lambda e: self.apply_ctrl_hotkey())
+        self.ctrl_hotkey_apply_btn = ctk.CTkButton(ctrl_hotkey_frame, text="Apply", width=60, command=self.apply_ctrl_hotkey)
+        self.ctrl_hotkey_apply_btn.pack(side="left", padx=5)
+        self.ctrl_hotkey_bind_btn = ctk.CTkButton(ctrl_hotkey_frame, text="Record", width=70, fg_color="orange", text_color="black", hover_color="#CC8800", command=lambda: self.start_hotkey_binding("controller"))
+        self.ctrl_hotkey_bind_btn.pack(side="left", padx=5)
+
+        self.dpad_switch = ctk.CTkSwitch(self.controller_frame, text="Enable DPAD Mapping", command=self.toggle_dpad)
+        self.dpad_switch.pack(padx=20, pady=6)
+        if state["dpad_enabled"]: self.dpad_switch.select()
+
+        self.joystick_switch = ctk.CTkSwitch(self.controller_frame, text="Enable Left Stick Mapping", command=self.toggle_joystick)
+        self.joystick_switch.pack(padx=20, pady=6)
+        if state["joystick_enabled"]: self.joystick_switch.select()
+
+        self.mouse_control_switch = ctk.CTkSwitch(
+            self.controller_frame,
+            text="Enable Right Stick Mouse Control",
+            command=self.toggle_mouse_control
+        )
+        self.mouse_control_switch.pack(padx=20, pady=6)
+        if state["right_stick_mouse_enabled"]: self.mouse_control_switch.select()
+
+        self.mouse_sens_label = ctk.CTkLabel(
+            self.controller_frame,
+            text=f"Right Stick Sensitivity: {state['mouse_sensitivity']}% of {state['mouse_dpi']} DPI",
+            font=ctk.CTkFont(size=15, weight="bold")
+        )
+        self.mouse_sens_label.pack(padx=20, pady=(15, 0))
+
+        self.mouse_sens_slider = ctk.CTkSlider(
+            self.controller_frame,
+            from_=1,
+            to=100,
+            number_of_steps=99,
+            command=self.set_mouse_sensitivity
+        )
+        self.mouse_sens_slider.set(state["mouse_sensitivity"])
+        self.mouse_sens_slider.pack(padx=20, pady=8, fill="x")
+
+        dpi_frame = ctk.CTkFrame(self.controller_frame, fg_color="transparent")
+        dpi_frame.pack(padx=20, pady=5)
+        ctk.CTkLabel(dpi_frame, text="Hardware Mouse DPI:").pack(side="left", padx=5)
+        self.mouse_dpi_entry = ctk.CTkEntry(dpi_frame, width=90)
+        self.mouse_dpi_entry.insert(0, str(state["mouse_dpi"]))
+        self.mouse_dpi_entry.pack(side="left", padx=5)
+        self.mouse_dpi_entry.bind("<Return>", lambda e: self.set_mouse_dpi())
+        self.mouse_dpi_entry.bind("<FocusOut>", lambda e: self.set_mouse_dpi())
+        ctk.CTkButton(dpi_frame, text="Apply DPI", width=80, command=self.set_mouse_dpi).pack(side="left", padx=5)
+
+        self.ctrl_input_display_label = ctk.CTkLabel(self.controller_frame, text="Keys / Axes Pressed: —", font=ctk.CTkFont(family="monospace", size=14))
+        self.ctrl_input_display_label.pack(padx=20, pady=(20, 10))
 
     def _setup_macro_frame(self):
         self.macro_frame.grid_columnconfigure(0, weight=1)
@@ -665,6 +800,8 @@ class DarkAgesApp(ctk.CTk):
     def select_frame_by_name(self, name):
         self.home_button.configure(fg_color=("gray75", "gray25") if name == "home" else "transparent")
         self.butterwalk_button.configure(fg_color=("gray75", "gray25") if name == "butterwalk" else "transparent")
+        self.spacebar_button.configure(fg_color=("gray75", "gray25") if name == "spacebar" else "transparent")
+        self.controller_button.configure(fg_color=("gray75", "gray25") if name == "controller" else "transparent")
         self.macro_button.configure(fg_color=("gray75", "gray25") if name == "macros" else "transparent")
 
         if name == "home": self.home_frame.grid(row=0, column=1, sticky="nsew")
@@ -672,12 +809,20 @@ class DarkAgesApp(ctk.CTk):
         
         if name == "butterwalk": self.butterwalk_frame.grid(row=0, column=1, sticky="nsew")
         else: self.butterwalk_frame.grid_forget()
+
+        if name == "spacebar": self.spacebar_frame.grid(row=0, column=1, sticky="nsew")
+        else: self.spacebar_frame.grid_forget()
+
+        if name == "controller": self.controller_frame.grid(row=0, column=1, sticky="nsew")
+        else: self.controller_frame.grid_forget()
         
         if name == "macros": self.macro_frame.grid(row=0, column=1, sticky="nsew")
         else: self.macro_frame.grid_forget()
 
     def home_button_event(self): self.select_frame_by_name("home")
     def butterwalk_button_event(self): self.select_frame_by_name("butterwalk")
+    def spacebar_button_event(self): self.select_frame_by_name("spacebar")
+    def controller_button_event(self): self.select_frame_by_name("controller")
     def macro_button_event(self): self.select_frame_by_name("macros")
 
     def toggle_bw(self): state["butterwalk"] = self.bw_switch.get() == 1
@@ -686,10 +831,47 @@ class DarkAgesApp(ctk.CTk):
         state["zxcv_enabled"] = self.zxcv_switch.get() == 1
         save_config()
 
+    def toggle_controller(self): 
+        from state import save_config
+        state["controller_enabled"] = self.controller_switch.get() == 1
+        save_config()
+
     def toggle_dpad(self): 
         from state import save_config
         state["dpad_enabled"] = self.dpad_switch.get() == 1
         save_config()
+
+    def toggle_joystick(self): 
+        from state import save_config
+        state["joystick_enabled"] = self.joystick_switch.get() == 1
+        save_config()
+
+    def toggle_mouse_control(self): 
+        from state import save_config
+        state["right_stick_mouse_enabled"] = self.mouse_control_switch.get() == 1
+        save_config()
+
+    def set_mouse_sensitivity(self, value):
+        from state import save_config
+        state["mouse_sensitivity"] = int(value)
+        self.mouse_sens_label.configure(
+            text=f"Right Stick Sensitivity: {state['mouse_sensitivity']}% of {state['mouse_dpi']} DPI"
+        )
+        save_config()
+
+    def set_mouse_dpi(self):
+        from state import save_config
+        try:
+            val = int(self.mouse_dpi_entry.get().strip())
+            if val > 0:
+                state["mouse_dpi"] = val
+                self.mouse_sens_label.configure(
+                    text=f"Right Stick Sensitivity: {state['mouse_sensitivity']}% of {state['mouse_dpi']} DPI"
+                )
+                save_config()
+        except ValueError:
+            self.mouse_dpi_entry.delete(0, 'end')
+            self.mouse_dpi_entry.insert(0, str(state["mouse_dpi"]))
 
     def toggle_space(self): 
         from state import save_config
@@ -702,12 +884,80 @@ class DarkAgesApp(ctk.CTk):
         self.multiplier_label.configure(text=f"Multiplier: {state['multiplier']}x")
         save_config()
 
+    def set_space_multiplier(self, value):
+        from state import save_config
+        state["space_multiplier"] = int(value)
+        self.space_multiplier_label.configure(text=f"Repeat Multiplier: {state['space_multiplier']}x")
+        save_config()
+
+    def start_hotkey_binding(self, target: str):
+        state["listening_for_hotkey"] = target
+        state["captured_hotkey"] = None
+        if target == "butterwalk":
+            self.bw_hotkey_bind_btn.configure(text="Press Keys...", state="disabled")
+        elif target == "controller":
+            self.ctrl_hotkey_bind_btn.configure(text="Press Keys...", state="disabled")
+        elif target == "space":
+            self.space_hotkey_bind_btn.configure(text="Press Keys...", state="disabled")
+
+    def apply_bw_hotkey(self):
+        from features.hotkeys import normalize_hotkey_str
+        from state import save_config
+        val = normalize_hotkey_str(self.bw_hotkey_entry.get().strip())
+        if val:
+            state["butterwalk_hotkey"] = val
+            self.bw_hotkey_entry.delete(0, 'end')
+            self.bw_hotkey_entry.insert(0, val)
+            save_config()
+
+    def apply_ctrl_hotkey(self):
+        from features.hotkeys import normalize_hotkey_str
+        from state import save_config
+        val = normalize_hotkey_str(self.ctrl_hotkey_entry.get().strip())
+        if val:
+            state["controller_hotkey"] = val
+            self.ctrl_hotkey_entry.delete(0, 'end')
+            self.ctrl_hotkey_entry.insert(0, val)
+            save_config()
+
+    def apply_space_hotkey(self):
+        from features.hotkeys import normalize_hotkey_str
+        from state import save_config
+        val = normalize_hotkey_str(self.space_hotkey_entry.get().strip())
+        if val:
+            state["space_hotkey"] = val
+            self.space_hotkey_entry.delete(0, 'end')
+            self.space_hotkey_entry.insert(0, val)
+            save_config()
+
     def update_gui(self):
         # Update Footer Status
         status_text = "● ACTIVE" if state["active"] else "○ Inactive"
         status_color = "#44AA44" if state["active"] else "gray"
         self.footer_status.configure(text=status_text, text_color=status_color)
-        
+
+        # Check for captured hotkeys
+        if state.get("captured_hotkey"):
+            target, combo = state["captured_hotkey"]
+            state["captured_hotkey"] = None
+            if target == "butterwalk":
+                state["butterwalk_hotkey"] = combo
+                self.bw_hotkey_entry.delete(0, 'end')
+                self.bw_hotkey_entry.insert(0, combo)
+                self.bw_hotkey_bind_btn.configure(text="Record", state="normal")
+            elif target == "controller":
+                state["controller_hotkey"] = combo
+                self.ctrl_hotkey_entry.delete(0, 'end')
+                self.ctrl_hotkey_entry.insert(0, combo)
+                self.ctrl_hotkey_bind_btn.configure(text="Record", state="normal")
+            elif target == "space":
+                state["space_hotkey"] = combo
+                self.space_hotkey_entry.delete(0, 'end')
+                self.space_hotkey_entry.insert(0, combo)
+                self.space_hotkey_bind_btn.configure(text="Record", state="normal")
+            from state import save_config
+            save_config()
+
         # Sync switches if they were changed via hotkey
         if state["butterwalk"] and self.bw_switch.get() == 0: self.bw_switch.select()
         elif not state["butterwalk"] and self.bw_switch.get() == 1: self.bw_switch.deselect()
@@ -715,17 +965,36 @@ class DarkAgesApp(ctk.CTk):
         if state["zxcv_enabled"] and self.zxcv_switch.get() == 0: self.zxcv_switch.select()
         elif not state["zxcv_enabled"] and self.zxcv_switch.get() == 1: self.zxcv_switch.deselect()
 
+        if state["controller_enabled"] and self.controller_switch.get() == 0: self.controller_switch.select()
+        elif not state["controller_enabled"] and self.controller_switch.get() == 1: self.controller_switch.deselect()
+
         if state["dpad_enabled"] and self.dpad_switch.get() == 0: self.dpad_switch.select()
         elif not state["dpad_enabled"] and self.dpad_switch.get() == 1: self.dpad_switch.deselect()
+
+        if state["joystick_enabled"] and self.joystick_switch.get() == 0: self.joystick_switch.select()
+        elif not state["joystick_enabled"] and self.joystick_switch.get() == 1: self.joystick_switch.deselect()
+
+        if state["right_stick_mouse_enabled"] and self.mouse_control_switch.get() == 0: self.mouse_control_switch.select()
+        elif not state["right_stick_mouse_enabled"] and self.mouse_control_switch.get() == 1: self.mouse_control_switch.deselect()
 
         if state["space_enabled"] and self.space_switch.get() == 0: self.space_switch.select()
         elif not state["space_enabled"] and self.space_switch.get() == 1: self.space_switch.deselect()
         
         self.multiplier_label.configure(text=f"Multiplier: {state['multiplier']}x")
         self.multiplier_slider.set(state["multiplier"])
+
+        self.space_multiplier_label.configure(text=f"Repeat Multiplier: {state['space_multiplier']}x")
+        self.space_multiplier_slider.set(state["space_multiplier"])
+
+        self.mouse_sens_label.configure(text=f"Right Stick Sensitivity: {state['mouse_sensitivity']}% of {state['mouse_dpi']} DPI")
+        self.mouse_sens_slider.set(state["mouse_sensitivity"])
         
         keys = ", ".join(k.replace("KEY_", "") for k in state["physical_keys_down"]) or "—"
         self.input_display_label.configure(text=f"Keys Pressed: {keys}")
+        self.space_input_display_label.configure(text=f"Keys Pressed: {keys}")
+        rx, ry = state.get("right_stick_x", 0.0), state.get("right_stick_y", 0.0)
+        stick_info = f" | RS: ({rx:+.2f}, {ry:+.2f})" if (rx != 0.0 or ry != 0.0) else ""
+        self.ctrl_input_display_label.configure(text=f"Keys / Axes Pressed: {keys}{stick_info}")
         
         # Update Footer Monitoring
         self.footer_last_event.configure(text=f"Last Event: {state['last_event']}")
