@@ -3,6 +3,7 @@ import os
 import json
 from typing import TypedDict, Literal, Any
 from dotenv import load_dotenv
+from features.shortcuts import Shortcut, load_shortcuts
 
 _ = load_dotenv()
 
@@ -28,11 +29,13 @@ def save_config() -> None:
             "mouse_dpi": state["mouse_dpi"],
             "space_enabled": state["space_enabled"],
             "space_multiplier": state["space_multiplier"],
+            "space_delay_ms": state["space_delay_ms"],
             "butterwalk_hotkey": state["butterwalk_hotkey"],
             "controller_hotkey": state["controller_hotkey"],
             "space_hotkey": state["space_hotkey"],
             "suppress_triggers": state["suppress_triggers"],
-            "multiplier": state["multiplier"]
+            "multiplier": state["multiplier"],
+            "butterwalk_delay_ms": state["butterwalk_delay_ms"]
         }
         with open(CONFIG_PATH, "w") as f:
             json.dump(config, f, indent=2)
@@ -78,6 +81,7 @@ class State(TypedDict):
     # butterwalk
     butterwalk: bool
     multiplier: int
+    butterwalk_delay_ms: int
     physical_keys_down: set[str]
     zxcv_enabled: bool
     # controller inputs
@@ -92,6 +96,7 @@ class State(TypedDict):
     # spacebar uninterrupted repeat
     space_enabled: bool
     space_multiplier: int
+    space_delay_ms: int
     # macros
     macros: list[Macro]
     macro_playing: set[str]
@@ -111,6 +116,9 @@ class State(TypedDict):
     space_hotkey: str
     listening_for_hotkey: str | None
     captured_hotkey: tuple[str, str] | None
+    # quick launch shortcuts
+    shortcuts: list[Shortcut]
+    active_window_id: str | None
 
 
 loaded_config = load_config()
@@ -119,10 +127,12 @@ state: State = {
     "running": True,
     "active": False,
     "client_name": "Searching...",
+    "active_window_id": None,
     "loop_interval": float(os.getenv("LOOP_INTERVAL") or DEFAULT_LOOP_INTERVAL),
     "window_hooks": loaded_config.get("window_hooks", (os.getenv("DARKAGES_WINDOW_NAMES") or DEFAULT_DARKAGES_WINDOW_NAMES).split(",")),
     "butterwalk": False,
     "multiplier": loaded_config.get("multiplier", int(os.getenv("DEFAULT_MULTIPLIER") or DEFAULT_MULTIPLIER)),
+    "butterwalk_delay_ms": loaded_config.get("butterwalk_delay_ms", 10),
     "physical_keys_down": set(),
     "zxcv_enabled": loaded_config.get("zxcv_enabled", False),
     "controller_enabled": loaded_config.get("controller_enabled", True),
@@ -135,6 +145,7 @@ state: State = {
     "right_stick_y": 0.0,
     "space_enabled": loaded_config.get("space_enabled", False),
     "space_multiplier": loaded_config.get("space_multiplier", 1),
+    "space_delay_ms": loaded_config.get("space_delay_ms", 10),
     "butterwalk_hotkey": loaded_config.get("butterwalk_hotkey", "ctrl + del"),
     "controller_hotkey": loaded_config.get("controller_hotkey", "ctrl + pgup"),
     "space_hotkey": loaded_config.get("space_hotkey", "ctrl + pgdn"),
@@ -150,4 +161,5 @@ state: State = {
     "listening_for_trigger": False,
     "captured_trigger": None,
     "suppress_triggers": loaded_config.get("suppress_triggers", False),
+    "shortcuts": load_shortcuts(),
 }

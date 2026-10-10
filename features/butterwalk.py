@@ -23,12 +23,6 @@ def on_key_event(event: InputEvent, key_name: str) -> None:
     elif event.value == 0:
         state["physical_keys_down"].discard(key_name)
 
-    if event.value == 1:
-        if key_name in ("KEY_KPMINUS", "KEY_MINUS"):
-            state["multiplier"] = max(1, state["multiplier"] - 1)
-        elif key_name in ("KEY_KPPLUS", "KEY_EQUAL"):
-            state["multiplier"] = min(5, state["multiplier"] + 1)
-
 
 async def injection_loop() -> None:
     while state["running"]:
@@ -57,9 +51,14 @@ async def injection_loop() -> None:
                             if val in valid_targets:
                                 active_targets.add(val)
 
-            for target in active_targets:
-                for _ in range(state["multiplier"]):
-                    await injector.key(target)
-
-        await asyncio.sleep(state["loop_interval"])
+            if active_targets:
+                for target in active_targets:
+                    for _ in range(state["multiplier"]):
+                        await injector.key(target)
+                delay = max(1, min(100, state.get("butterwalk_delay_ms", 10))) / 1000.0
+                await asyncio.sleep(delay)
+            else:
+                await asyncio.sleep(0.05)
+        else:
+            await asyncio.sleep(0.05)
 

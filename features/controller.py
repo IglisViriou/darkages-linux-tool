@@ -77,5 +77,7 @@ async def injection_loop() -> None:
         else:
             acc_x = 0.0
             acc_y = 0.0
+            await asyncio.sleep(0.05)
+            continue
 
         await asyncio.sleep(state["loop_interval"])

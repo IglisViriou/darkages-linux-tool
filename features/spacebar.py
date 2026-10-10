@@ -30,4 +30,9 @@ async def injection_loop() -> None:
                 for _ in range(multiplier):
                     await injector.key("space")
 
-        await asyncio.sleep(state["loop_interval"])
+                delay = max(1, min(100, state.get("space_delay_ms", 10))) / 1000.0
+                await asyncio.sleep(delay)
+            else:
+                await asyncio.sleep(0.05)
+        else:
+            await asyncio.sleep(0.05)

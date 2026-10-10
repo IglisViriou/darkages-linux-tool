@@ -41,7 +41,7 @@ for c in string.ascii_lowercase:
     XKEY_TO_EVDEV[c] = getattr(ecodes, f"KEY_{c.upper()}", None)
 
 
-async def key(key_name: str) -> None:
+async def key(key_name: str, hold_s: float = 0.004, gap_s: float = 0.002) -> None:
     # Try using virtual input (uinput) first for high performance and low latency
     if input_hub._uinput is not None:
         key_lower = key_name.lower()
@@ -56,17 +56,17 @@ async def key(key_name: str) -> None:
                 
                 input_hub._uinput.write(ecodes.EV_KEY, code, 1)
                 input_hub._uinput.syn()
-                # A small delay is required to ensure the target game/application
-                # registers the key down state before it is released.
-                await asyncio.sleep(0.015)
+                # Fast pulse hold ensures the game registers key down without stalling the macro
+                if hold_s > 0:
+                    await asyncio.sleep(hold_s)
                 
                 input_hub._uinput.write(ecodes.EV_KEY, code, 0)
                 if use_shift:
                     input_hub._uinput.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
                 input_hub._uinput.syn()
-                # A small gap delay is required to ensure the target game/application
-                # processes the key release before the next key event.
-                await asyncio.sleep(0.015)
+                # Inter-key gap ensures consecutive identical keys register distinctly
+                if gap_s > 0:
+                    await asyncio.sleep(gap_s)
                 return
             except Exception:
                 pass  # Fallback to xdotool if writing to uinput fails
@@ -80,13 +80,29 @@ async def key(key_name: str) -> None:
     await proc.wait()
 
 
-async def mouse_click(button: int, x: int | None = None, y: int | None = None) -> None:
+async def mouse_click(button: int, x: int | None = None, y: int | None = None, hold_s: float = 0.005, gap_s: float = 0.003) -> None:
     if x is not None and y is not None:
-        # Move relative to the current active window and click
-        # Using shell=True for the subshell expansion
-        cmd = f"xdotool mousemove --window $(xdotool getactivewindow) {x} {y} click {button}"
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
+        from state import state
+        wid = state.get("active_window_id")
+        if not wid:
+            try:
+                proc_w = await asyncio.create_subprocess_exec(
+                    "xdotool", "getactivewindow",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                out_w, _ = await proc_w.communicate()
+                wid = out_w.decode().strip() or None
+            except Exception:
+                wid = None
+
+        args = ["xdotool", "mousemove"]
+        if wid:
+            args.extend(["--window", wid])
+        args.extend([str(x), str(y), "click", str(button)])
+
+        proc = await asyncio.create_subprocess_exec(
+            *args,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL
         )
@@ -102,24 +118,19 @@ async def mouse_click(button: int, x: int | None = None, y: int | None = None) -
             code = button_map.get(button)
             if code is not None:
                 try:
-                    # Send a tiny 0-motion event to force X11/libinput to synchronize
-                    # the virtual pointer location with the physical/active mouse cursor.
-                    input_hub._uinput.write(ecodes.EV_REL, ecodes.REL_X, 0)
-                    input_hub._uinput.write(ecodes.EV_REL, ecodes.REL_Y, 0)
-                    
                     # Press mouse button
                     input_hub._uinput.write(ecodes.EV_KEY, code, 1)
                     input_hub._uinput.syn()
                     
-                    # 25ms hold duration
-                    await asyncio.sleep(0.025)
+                    if hold_s > 0:
+                        await asyncio.sleep(hold_s)
                     
                     # Release mouse button
                     input_hub._uinput.write(ecodes.EV_KEY, code, 0)
                     input_hub._uinput.syn()
                     
-                    # 25ms release gap before next input
-                    await asyncio.sleep(0.025)
+                    if gap_s > 0:
+                        await asyncio.sleep(gap_s)
                     return
                 except Exception:
                     pass  # Fallback to xdotool if writing to uinput fails

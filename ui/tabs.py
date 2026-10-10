@@ -6,7 +6,7 @@ from features.macro import MacroFeature
 from ui import theme
 from ui.canvas import Canvas, Chunk
 
-TAB_NAMES = ["Home", "Butterwalk", "Spacebar", "Controller", "Macros"]
+TAB_NAMES = ["Home", "Butterwalk", "Continuous Assail", "Controller", "Macros", "Autofollowing", "Credits"]
 APP_TITLE = "DarkAges Linux Tool"
 
 _FOOTER = "q quit  ·  Tab switch  ·  Mouse supported"
@@ -143,9 +143,20 @@ def _draw_butterwalk(canvas: Canvas, top: int) -> None:
     _field(
         canvas,
         row,
-        "Level",
-        (str(state["multiplier"]), theme.warn(bold=True)),
-        ("  [+/- on physical keys]", theme.muted()),
+        "Multiplier",
+        (f"{state['multiplier']}x", theme.warn(bold=True)),
+        ("  [+/-]", theme.muted()),
+        (" (Repeats per trigger at selected ms)", theme.muted()),
+    )
+    row += 2
+
+    _field(
+        canvas,
+        row,
+        "Repeat Speed",
+        (f"{state['butterwalk_delay_ms']} ms", theme.warn(bold=True)),
+        ("  [[/]]", theme.muted()),
+        (" (Wait time in ms between repeats)", theme.muted()),
     )
     row += 2
 
@@ -187,6 +198,22 @@ def _draw_butterwalk(canvas: Canvas, top: int) -> None:
 def _handle_butterwalk_input(ch: int) -> None:
     if ch in (ord("b"), ord("B")):
         state["butterwalk"] = not state["butterwalk"]
+    elif ch in (ord("-"), ord("_")):
+        state["multiplier"] = max(1, state["multiplier"] - 1)
+        from state import save_config
+        save_config()
+    elif ch in (ord("+"), ord("=")):
+        state["multiplier"] = min(5, state["multiplier"] + 1)
+        from state import save_config
+        save_config()
+    elif ch == ord("["):
+        state["butterwalk_delay_ms"] = max(1, state["butterwalk_delay_ms"] - 5)
+        from state import save_config
+        save_config()
+    elif ch == ord("]"):
+        state["butterwalk_delay_ms"] = min(100, state["butterwalk_delay_ms"] + 5)
+        from state import save_config
+        save_config()
     elif ch in (ord("m"), ord("M")):
         state["zxcv_enabled"] = not state["zxcv_enabled"]
         from state import save_config
@@ -203,7 +230,7 @@ def _draw_spacebar(canvas: Canvas, top: int) -> None:
     _field(
         canvas,
         row,
-        "Space Repeat",
+        "Continuous Assail",
         *_pill(state["space_enabled"]),
         ("  [s]", theme.muted()),
     )
@@ -213,8 +240,19 @@ def _draw_spacebar(canvas: Canvas, top: int) -> None:
         canvas,
         row,
         "Multiplier",
-        (str(state["space_multiplier"]), theme.warn(bold=True)),
+        (f"{state['space_multiplier']}x", theme.warn(bold=True)),
         ("  [+/-]", theme.muted()),
+        (" (Repeats per trigger at selected ms)", theme.muted()),
+    )
+    row += 2
+
+    _field(
+        canvas,
+        row,
+        "Repeat Speed",
+        (f"{state['space_delay_ms']} ms", theme.warn(bold=True)),
+        ("  [[/]]", theme.muted()),
+        (" (Wait time in ms between repeats)", theme.muted()),
     )
     row += 2
 
@@ -245,9 +283,17 @@ def _handle_spacebar_input(ch: int) -> None:
         state["space_multiplier"] = min(5, state["space_multiplier"] + 1)
         from state import save_config
         save_config()
+    elif ch == ord("["):
+        state["space_delay_ms"] = max(1, state["space_delay_ms"] - 5)
+        from state import save_config
+        save_config()
+    elif ch == ord("]"):
+        state["space_delay_ms"] = min(100, state["space_delay_ms"] + 5)
+        from state import save_config
+        save_config()
     elif ch in (ord("k"), ord("K")):
         state["listening_for_hotkey"] = "space"
-        state["last_event"] = "Press keys to bind Spacebar hotkey..."
+        state["last_event"] = "Press keys to bind Continuous Assail hotkey..."
     elif ch == 27 and state.get("listening_for_hotkey") == "space":
         state["listening_for_hotkey"] = None
 
@@ -381,6 +427,24 @@ def _handle_controller_input(ch: int) -> None:
         state["listening_for_hotkey"] = None
 
 
+def _draw_autofollowing(canvas: Canvas, top: int) -> None:
+    row = top + 2
+    canvas.put(row, 4, "Autofollowing Features will not be added to DALT.", theme.warn(bold=True))
+    row += 2
+    canvas.put(row, 4, "Please use an alternative program to control autofollowing.", theme.muted())
+    row += 2
+    canvas.put(row, 4, "The only reason this tab exists is solely so I don't get messages asking for this feature.", theme.muted())
+
+
+def _draw_credits(canvas: Canvas, top: int) -> None:
+    row = top + 2
+    canvas.put(row, 4, "DALT is brought to you by the following Aislings", theme.warn(bold=True))
+    row += 2
+    canvas.put(row, 4, """Initial Coding and Setup, Initial Macro and Butterwalk implementation: Phever - https://github.com/phever
+GUI Implementation and Troubleshooting: Aon - https://github.com/FreyaNile
+Feature implementation, Optimization, and Polishing: Iglis - https://github.com/kryptosfang""", theme.muted())
+
+
 # ── main loop ─────────────────────────────────────────────────────────────
 
 
@@ -439,6 +503,10 @@ def draw_ui(stdscr: curses.window, macro_feature: MacroFeature) -> None:
                 macro_feature.draw(sub)
             except curses.error:
                 pass
+        elif active == 5:
+            _draw_autofollowing(canvas, content_top)
+        elif active == 6:
+            _draw_credits(canvas, content_top)
 
         in_macro_input = active == 4 and macro_feature.phase is not None
         _draw_footer(canvas, _MACRO_WIZARD_FOOTER if in_macro_input else _FOOTER)
@@ -457,11 +525,26 @@ def draw_ui(stdscr: curses.window, macro_feature: MacroFeature) -> None:
                     elif active == 1:
                         if y == content_top + 1:
                             state["butterwalk"] = not state["butterwalk"]
+                        elif y == content_top + 3:
+                            state["multiplier"] = (state["multiplier"] % 5) + 1
+                            from state import save_config
+                            save_config()
                         elif y == content_top + 5:
-                            state["zxcv_enabled"] = not state["zxcv_enabled"]
+                            delays = [5, 10, 25, 50, 100]
+                            curr = state["butterwalk_delay_ms"]
+                            next_delay = delays[0]
+                            for d in delays:
+                                if d > curr:
+                                    next_delay = d
+                                    break
+                            state["butterwalk_delay_ms"] = next_delay
                             from state import save_config
                             save_config()
                         elif y == content_top + 7:
+                            state["zxcv_enabled"] = not state["zxcv_enabled"]
+                            from state import save_config
+                            save_config()
+                        elif y == content_top + 9:
                             state["listening_for_hotkey"] = "butterwalk"
                             state["last_event"] = "Press keys to bind Butterwalk hotkey..."
                     elif active == 2:
@@ -469,9 +552,24 @@ def draw_ui(stdscr: curses.window, macro_feature: MacroFeature) -> None:
                             state["space_enabled"] = not state["space_enabled"]
                             from state import save_config
                             save_config()
+                        elif y == content_top + 3:
+                            state["space_multiplier"] = (state["space_multiplier"] % 5) + 1
+                            from state import save_config
+                            save_config()
                         elif y == content_top + 5:
+                            delays = [5, 10, 25, 50, 100]
+                            curr = state["space_delay_ms"]
+                            next_delay = delays[0]
+                            for d in delays:
+                                if d > curr:
+                                    next_delay = d
+                                    break
+                            state["space_delay_ms"] = next_delay
+                            from state import save_config
+                            save_config()
+                        elif y == content_top + 7:
                             state["listening_for_hotkey"] = "space"
-                            state["last_event"] = "Press keys to bind Spacebar hotkey..."
+                            state["last_event"] = "Press keys to bind Continuous Assail hotkey..."
                     elif active == 3:
                         if y == content_top + 1:
                             state["controller_enabled"] = not state["controller_enabled"]
@@ -510,6 +608,10 @@ def draw_ui(stdscr: curses.window, macro_feature: MacroFeature) -> None:
             active = 3
         elif ch == ord("5"):
             active = 4
+        elif ch == ord("6"):
+            active = 5
+        elif ch == ord("7"):
+            active = 6
         elif ch == 9:  # Tab
             active = (active + 1) % len(TAB_NAMES)
         elif active == 1:

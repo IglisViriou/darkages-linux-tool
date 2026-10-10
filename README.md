@@ -39,8 +39,8 @@ This project is a significantly enhanced and hardened fork of the original `ugh-
 ### 1. Enable/Disable Macros
 *   **Macro Toggling**: Allows you to enable and disable macros on a whim so that you can map the same trigger key to multiple macros without interference.
 
-### 2. Spacebar Uninterrupted Repeat
-*   **Spacebar Uninterrupted Repeat**: A dedicated tab and tool independent of Butterwalk. Continuously repeats Space Bar inputs while held down, even during macro execution, so you can hold space to attack/interact and execute macros without letting go of space. Keep in mind that while enabled, typing may become difficult due to multiple space inputs.
+### 2. Continuous Assail (Spacebar Repeat)
+*   **Continuous Assail**: A dedicated tab and tool independent of Butterwalk. Continuously repeats Space Bar inputs (Assail) while held down, even during macro execution, so you can hold space to attack/interact and execute macros without letting go of space. Keep in mind that while enabled, typing may become difficult due to multiple space inputs.
 
 ### 3. Controller Inputs & Mouse Emulation
 *   **Dedicated Controller Tab**: Controller mapping is completely separated into its own tab with independent toggles for master Controller Mapping, DPAD Mapping, and Left Stick (Thumbstick) Mapping.
@@ -56,6 +56,9 @@ This project is a significantly enhanced and hardened fork of the original `ugh-
 ### 5. Exact Name Match
 *   **Non-Invasive Window Hooks**: Unlike the two previous versions, DarkAges Linux Tool now searches for exact window names instead of windows with the provided terms in them. 
 
+### 6. Quick Launch Clients & Tools
+*   **Home Tab Quick Launch**: Quickly open DarkAges clients and tools directly from DALT. Add shortcuts with custom names, target executables or scripts, and custom icons. Automatically extracts application icons from Windows executables (`.exe`), Linux `.desktop` files, or local assets with seamless fallback to DALT defaults.
+
 ## 🛠 Prerequisites
 
 *   **OS**: Linux (X11 recommended)
@@ -67,7 +70,7 @@ This project is a significantly enhanced and hardened fork of the original `ugh-
 1.  Initialize the environment: `./setup.sh`
 2.  Start the tools: `./start.sh`
 3.  **Toggle Butterwalk**: `Ctrl + Del` (default hotkey), `b` (TUI), or use the GUI switch.
-4.  **Spacebar Uninterrupted Repeat**: `Ctrl + PgDn` (default hotkey), navigate to the dedicated tab (`s` in TUI or GUI switch) to configure repeat multiplier or rebind hotkey.
+4.  **Continuous Assail**: `Ctrl + PgDn` (default hotkey), navigate to the dedicated tab (`s` in TUI or GUI switch) to configure repeat multiplier, speed delay, or rebind hotkey.
 5.  **Controller Inputs**: `Ctrl + PgUp` (default hotkey), navigate to the Controller Inputs tab (`c` in TUI or GUI switch) to toggle controller, DPAD, thumbstick mapping, Right Analog Stick mouse cursor emulation, or rebind hotkey.
 6.  **Manage Macros**: Navigate to the Macros tab to record clicks or bind triggers.
 

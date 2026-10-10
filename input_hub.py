@@ -137,6 +137,86 @@ def _normalize_stick_axis(value: int, abs_info: Any = None) -> float:
     return sign * ((abs(norm) - DEADZONE) / (1.0 - DEADZONE))
 
 
+# Allowed keys for "Suppress Trigger Keys":
+# - Tilde (` and ~): KEY_GRAVE, KEY_TILDE
+# - F keys: KEY_F1 to KEY_F24
+# - Home cluster above arrow keys: KEY_HOME, KEY_DELETE, KEY_END, KEY_INSERT
+STANDARD_SUPPRESSIBLE_KEYS: set[str] = {
+    # Tilde key (` and ~)
+    "KEY_GRAVE",
+    "KEY_TILDE",
+    # Home cluster above arrow keys (home, del, end, ins)
+    "KEY_HOME",
+    "KEY_DELETE",
+    "KEY_END",
+    "KEY_INSERT",
+    # Function keys (F keys)
+    *(f"KEY_F{i}" for i in range(1, 25)),
+}
+
+PGUP_PGDN_KEYS: set[str] = {
+    "KEY_PAGEUP",
+    "KEY_PAGEDOWN",
+}
+
+
+def _is_macro_trigger(key_name: str, state: dict) -> bool:
+    """Check if key_name is an active trigger for an enabled macro."""
+    macros = state.get("macros", [])
+    for m in macros:
+        if m.get("enabled", True):
+            trig = m.get("trigger", "")
+            if trig == key_name or trig == key_name.replace("KEY_", "").lower():
+                return True
+    return False
+
+
+def _is_feature_hotkey_trigger(key_name: str, state: dict) -> bool:
+    """Check if key_name matches Butterwalk, Controller, or Continuous Assail hotkeys."""
+    from features.hotkeys import matches_hotkey
+    keys_down = state.get("physical_keys_down", set())
+
+    for hk_name in ("butterwalk_hotkey", "controller_hotkey", "space_hotkey"):
+        hk = state.get(hk_name)
+        if hk and matches_hotkey(hk, key_name, keys_down):
+            return True
+
+    return False
+
+
+def should_suppress_key(key_name: str | None, state: dict) -> bool:
+    """
+    Determine if key_name should be suppressed from reaching the game:
+    - pgup and pgdn are ONLY suppressed if a currently enabled macro uses them as a trigger,
+      including Butterwalk, Controller, and Continuous Assail hotkeys.
+    - Tilde, F keys, and Home cluster (Home, Del, End, Ins) are suppressed if they trigger
+      an enabled macro or feature hotkey.
+    - Other keys are never suppressed.
+    """
+    if not key_name or not state.get("suppress_triggers") or not state.get("active"):
+        return False
+
+    norm = key_name.upper()
+
+    # Exception for PageUp and PageDown: ONLY suppress if bound to an enabled macro or feature hotkey
+    if norm in PGUP_PGDN_KEYS:
+        if _is_macro_trigger(norm, state):
+            return True
+        if _is_feature_hotkey_trigger(norm, state):
+            return True
+        return False
+
+    # Standard suppressible keys
+    if norm in STANDARD_SUPPRESSIBLE_KEYS:
+        if _is_macro_trigger(norm, state):
+            return True
+        if _is_feature_hotkey_trigger(norm, state):
+            return True
+        return False
+
+    return False
+
+
 async def _read_device(device: InputDevice[str]) -> None:
     from state import state
     axis_states: dict[int, int] = {}
@@ -161,10 +241,8 @@ async def _read_device(device: InputDevice[str]) -> None:
             if event.type == ecodes.EV_KEY:
                 key_name = _normalize_key_name(event.code)
                 if key_name:
-                    if state["suppress_triggers"] and state["active"]:
-                        is_trigger = any(m["trigger"] == key_name for m in state["macros"])
-                        if is_trigger:
-                            suppressed = True
+                    if should_suppress_key(key_name, state):
+                        suppressed = True
                     
                     _fire_callbacks(event, key_name, device.name)
 
@@ -260,3 +338,22 @@ def get_device_names() -> list[str]:
 
 def get_read_tasks() -> list[Coroutine[Any, Any, None]]:
     return [_read_device(d) for d in _keyboards + _mice]
+
+
+def cleanup_devices() -> None:
+    global _uinput
+    try:
+        toggle_suppression(False)
+    except Exception:
+        pass
+    if _uinput is not None:
+        try:
+            _uinput.close()
+        except Exception:
+            pass
+        _uinput = None
+    for d in _keyboards + _mice:
+        try:
+            d.close()
+        except Exception:
+            pass

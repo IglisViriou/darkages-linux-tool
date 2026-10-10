@@ -15,14 +15,25 @@ dist/
 build/
 *.egg-info/
 
-# User configurations, personal settings, and macros
+# User configurations, personal settings, Quick Launch, and macros
 .env
 .env.*
 *.env
+# Personal settings (Window Hooks, Butterwalk, Continuous Assail, Controller, Hotkeys)
 config.json
+# Personal macros and keybinds
 macros.json
+# Quick Launch shortcuts and icon caches
+shortcuts.json
+icons/
+.config/
+# General user JSON configs
 *.json
 !example*.json
+!default*.json
+# Local data and backups
+*.dat
+*.bak
 
 # Logs, scratch scripts & temporary files
 *.log

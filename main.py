@@ -42,12 +42,14 @@ async def get_darkages_window_info() -> tuple[str | None, str]:
 
 async def focus_monitor() -> None:
     while state["running"]:
-        _, name = await get_darkages_window_info()
-        state["client_name"] = name or "Not Found"
-        if name:
-            state["active"] = any(x.lower() == name.lower() for x in state["window_hooks"])
-        else:
-            state["active"] = False
+        if not state.get("macro_playing"):
+            wid, name = await get_darkages_window_info()
+            state["active_window_id"] = wid
+            state["client_name"] = name or "Not Found"
+            if name:
+                state["active"] = any(x.lower() == name.lower() for x in state["window_hooks"])
+            else:
+                state["active"] = False
         await asyncio.sleep(0.5)
 
 
@@ -65,7 +67,10 @@ async def main_async(macro_feature: MacroFeature) -> None:
     tasks.append(controller.injection_loop())
     tasks.append(macro_feature.hold_loop())
     tasks.append(focus_monitor())
-    _ = await asyncio.gather(*tasks)
+    try:
+        _ = await asyncio.gather(*tasks, return_exceptions=True)
+    except asyncio.CancelledError:
+        pass
 
 
 def main(use_gui: bool = True) -> None:
@@ -75,8 +80,19 @@ def main(use_gui: bool = True) -> None:
     loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
+    def run_loop() -> None:
+        try:
+            loop.run_until_complete(main_async(macro_feature))
+        except (asyncio.CancelledError, RuntimeError):
+            pass
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+
     t: threading.Thread = threading.Thread(
-        target=lambda: loop.run_until_complete(main_async(macro_feature)),
+        target=run_loop,
         daemon=True,
     )
     t.start()
@@ -92,7 +108,16 @@ def main(use_gui: bool = True) -> None:
         curses.wrapper(lambda stdscr: main_tui(stdscr, macro_feature, loop))
 
     state["running"] = False
-    _ = loop.call_soon_threadsafe(loop.stop)
+
+    def _shutdown() -> None:
+        for task in asyncio.all_tasks(loop):
+            task.cancel()
+
+    if loop.is_running():
+        loop.call_soon_threadsafe(_shutdown)
+
+    t.join(timeout=1.0)
+    input_hub.cleanup_devices()
 
 
 def main_tui(stdscr: curses.window, macro_feature: MacroFeature, loop: asyncio.AbstractEventLoop) -> None:

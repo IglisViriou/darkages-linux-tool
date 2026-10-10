@@ -39,13 +39,20 @@ _TRIGGER_MAP: dict[str, str] = {
     "dpad_left": "BTN_DPAD_LEFT",
     "dpad_right": "BTN_DPAD_RIGHT",
     "l2": "BTN_L2",
-    "r2": "BTN_R2",
+    "grave": "KEY_GRAVE",
+    "tilde": "KEY_GRAVE",
+    "`": "KEY_GRAVE",
+    "~": "KEY_GRAVE",
     **{f"f{i}": f"KEY_F{i}" for i in range(1, 13)},
     **{str(i): f"KEY_{i}" for i in range(10)},
     **{chr(c): f"KEY_{chr(c).upper()}" for c in range(ord("a"), ord("z") + 1)},
 }
 
 _SPECIAL_XDOTOOL: dict[str, str] = {
+    "grave": "grave",
+    "tilde": "asciitilde",
+    "`": "grave",
+    "~": "asciitilde",
     "enter": "Return",
     "return": "Return",
     "space": "space",
@@ -167,13 +174,16 @@ class MacroFeature:
                         and macro["trigger"] in state["physical_keys_down"]
                         and macro["id"] not in state["macro_playing"]
                     ):
+                        state["macro_playing"].add(macro["id"])
                         try:
                             _ = asyncio.get_running_loop().create_task(
                                 self._play_macro(macro)
                             )
                         except RuntimeError:
-                            pass
-            await asyncio.sleep(state["loop_interval"])
+                            state["macro_playing"].discard(macro["id"])
+                await asyncio.sleep(state["loop_interval"])
+            else:
+                await asyncio.sleep(0.05)
 
     def on_key_event(self, event: InputEvent, key_name: str) -> None:
         # Handle Trigger Binding Mode
@@ -210,12 +220,13 @@ class MacroFeature:
                             pass
                         continue
 
+                    state["macro_playing"].add(macro["id"])
                     try:
                         _ = asyncio.get_running_loop().create_task(
                             self._play_macro(macro)
                         )
                     except RuntimeError:
-                        pass
+                        state["macro_playing"].discard(macro["id"])
 
     async def _play_macro(self, macro: Macro) -> None:
         # Cancel any other interruptible macros
@@ -357,12 +368,13 @@ class MacroFeature:
             if 0 <= self._selected < len(macros):
                 macro = macros[self._selected]
                 if macro["id"] not in state["macro_playing"]:
+                    state["macro_playing"].add(macro["id"])
                     try:
                         _ = asyncio.get_running_loop().create_task(
                             self._play_macro(macro)
                         )
                     except RuntimeError:
-                        pass
+                        state["macro_playing"].discard(macro["id"])
 
     def handle_mouse(self, x: int, y: int) -> None:
         if self.phase is not None:

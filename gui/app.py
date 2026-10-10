@@ -1,6 +1,7 @@
 import customtkinter as ctk
 import tkinter as tk
 import os
+from tkinter import filedialog
 from state import state
 from features.macro import (
     MacroFeature, 
@@ -10,6 +11,13 @@ from features.macro import (
     Macro, 
     DEFAULT_STEP_DELAY,
     _SPECIAL_XDOTOOL
+)
+from features.shortcuts import (
+    Shortcut,
+    save_shortcuts,
+    resolve_icon,
+    launch_shortcut,
+    ICONS_CACHE_DIR
 )
 import threading
 import asyncio
@@ -372,7 +380,247 @@ class MacroEditor(ctk.CTkToplevel):
         self.on_save(macro)
         self.destroy()
 
+class ShortcutEditor(ctk.CTkToplevel):
+    def __init__(self, parent, on_save, shortcut_to_edit=None):
+        super().__init__(parent)
+        
+        # Set icon
+        try:
+            self.icon_img = tk.PhotoImage(file='icon.png')
+            self.wm_iconphoto(False, self.icon_img)
+        except Exception:
+            pass
+
+        self.shortcut_to_edit = shortcut_to_edit
+        self.title("Edit Launch Shortcut" if shortcut_to_edit else "New Launch Shortcut")
+        self.geometry("580x560")
+        self.resizable(False, False)
+        self.on_save = on_save
+        
+        self.custom_icon_path = shortcut_to_edit.get("custom_icon_path") if shortcut_to_edit else None
+        self.target_path = shortcut_to_edit.get("target_path", "") if shortcut_to_edit else ""
+        self.shortcut_id = shortcut_to_edit.get("id", str(uuid.uuid4())) if shortcut_to_edit else str(uuid.uuid4())
+        self.preview_image = None
+
+        self.main_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_container.pack(fill="both", expand=True, padx=25, pady=20)
+
+        # Header Title
+        title_text = "Edit Launch Shortcut" if shortcut_to_edit else "Add New Launch Shortcut"
+        ctk.CTkLabel(self.main_container, text=title_text, font=ctk.CTkFont(size=20, weight="bold")).pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(
+            self.main_container,
+            text="Configure a shortcut to quickly open DarkAges clients or automation tools.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        ).pack(anchor="w", pady=(0, 20))
+
+        # Shortcut Name
+        ctk.CTkLabel(self.main_container, text="Shortcut Name:", font=ctk.CTkFont(weight="bold")).pack(anchor="w")
+        self.name_entry = ctk.CTkEntry(self.main_container, placeholder_text="e.g. DarkAges, Sapphire, Windower...", width=530)
+        self.name_entry.pack(pady=(5, 15), anchor="w")
+        if shortcut_to_edit:
+            self.name_entry.insert(0, shortcut_to_edit["name"])
+
+        # Target File to Run
+        ctk.CTkLabel(self.main_container, text="Target File to Run:", font=ctk.CTkFont(weight="bold")).pack(anchor="w")
+        target_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        target_frame.pack(fill="x", pady=(5, 15))
+        
+        self.target_entry = ctk.CTkEntry(target_frame, placeholder_text="Path to executable, script, or client...", width=430)
+        self.target_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        if shortcut_to_edit:
+            self.target_entry.insert(0, shortcut_to_edit["target_path"])
+        self.target_entry.bind("<KeyRelease>", lambda e: self.update_icon_preview())
+
+        browse_target_btn = ctk.CTkButton(target_frame, text="Browse...", width=90, command=self.browse_target)
+        browse_target_btn.pack(side="right")
+
+        # Custom Icon (Optional)
+        ctk.CTkLabel(
+            self.main_container,
+            text="Custom Icon (Optional - leave empty to use application icon):",
+            font=ctk.CTkFont(weight="bold")
+        ).pack(anchor="w")
+        icon_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        icon_frame.pack(fill="x", pady=(5, 15))
+
+        self.icon_entry = ctk.CTkEntry(icon_frame, placeholder_text="Leave blank to use selected application's icon...", width=340)
+        self.icon_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        if shortcut_to_edit and shortcut_to_edit.get("custom_icon_path"):
+            self.icon_entry.insert(0, shortcut_to_edit["custom_icon_path"])
+        self.icon_entry.bind("<KeyRelease>", lambda e: self.update_icon_preview())
+
+        browse_icon_btn = ctk.CTkButton(icon_frame, text="Browse...", width=80, command=self.browse_icon)
+        browse_icon_btn.pack(side="left", padx=(0, 5))
+
+        clear_icon_btn = ctk.CTkButton(icon_frame, text="Clear", width=60, fg_color="gray", command=self.clear_icon)
+        clear_icon_btn.pack(side="left")
+
+        # Live Icon Preview Card
+        preview_box = ctk.CTkFrame(self.main_container, fg_color=("gray85", "#242424"), corner_radius=6)
+        preview_box.pack(fill="x", pady=(5, 15))
+
+        self.preview_icon_label = ctk.CTkLabel(preview_box, text="", width=48, height=48)
+        self.preview_icon_label.pack(side="left", padx=15, pady=10)
+
+        preview_text_frame = ctk.CTkFrame(preview_box, fg_color="transparent")
+        preview_text_frame.pack(side="left", fill="both", expand=True, pady=10)
+
+        self.preview_status_label = ctk.CTkLabel(
+            preview_text_frame,
+            text="Icon Preview",
+            font=ctk.CTkFont(size=13, weight="bold")
+        )
+        self.preview_status_label.pack(anchor="w")
+
+        self.preview_desc_label = ctk.CTkLabel(
+            preview_text_frame,
+            text="Displays custom icon or extracts icon from application.",
+            font=ctk.CTkFont(size=11),
+            text_color="gray"
+        )
+        self.preview_desc_label.pack(anchor="w")
+
+        # Error / Validation Label
+        self.error_label = ctk.CTkLabel(self.main_container, text="", text_color="red", font=ctk.CTkFont(size=12))
+        self.error_label.pack(anchor="w", pady=(0, 10))
+
+        # Action Buttons (Cancel / Save)
+        action_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        action_frame.pack(fill="x", pady=(5, 0))
+
+        cancel_btn = ctk.CTkButton(action_frame, text="Cancel", fg_color="gray", command=self.destroy)
+        cancel_btn.pack(side="left")
+
+        save_btn = ctk.CTkButton(action_frame, text="Save Shortcut", command=self.save)
+        save_btn.pack(side="right")
+
+        # Initial preview update
+        self.update_icon_preview()
+
+    def browse_target(self):
+        f = filedialog.askopenfilename(
+            title="Select Client / Tool Executable or Script",
+            filetypes=[
+                ("Executables & Scripts", "*.exe *.sh *.desktop *"),
+                ("All Files", "*.*")
+            ]
+        )
+        if f:
+            self.target_entry.delete(0, "end")
+            self.target_entry.insert(0, f)
+            if not self.name_entry.get().strip():
+                base = os.path.splitext(os.path.basename(f))[0]
+                clean_name = base.replace("-", " ").replace("_", " ").title()
+                self.name_entry.insert(0, clean_name)
+            self.update_icon_preview()
+
+    def browse_icon(self):
+        f = filedialog.askopenfilename(
+            title="Select Custom Icon Image",
+            filetypes=[
+                ("Image Files", "*.png *.ico *.jpg *.jpeg *.bmp *.svg"),
+                ("All Files", "*.*")
+            ]
+        )
+        if f:
+            self.icon_entry.delete(0, "end")
+            self.icon_entry.insert(0, f)
+            self.update_icon_preview()
+
+    def clear_icon(self):
+        self.icon_entry.delete(0, "end")
+        self.update_icon_preview()
+
+    def update_icon_preview(self):
+        target = self.target_entry.get().strip()
+        custom = self.icon_entry.get().strip() or None
+        
+        tmp_preview = os.path.join(ICONS_CACHE_DIR, f"preview_{self.shortcut_id}.png")
+        ok, source_desc = resolve_icon(target, custom, tmp_preview)
+        
+        if ok and os.path.exists(tmp_preview):
+            try:
+                self.preview_image = tk.PhotoImage(file=tmp_preview)
+                self.preview_icon_label.configure(image=self.preview_image, text="")
+            except Exception:
+                self.preview_icon_label.configure(image=None, text="[IMG]")
+        else:
+            self.preview_icon_label.configure(image=None, text="[None]")
+
+        if source_desc == "custom":
+            self.preview_status_label.configure(text="Custom Icon")
+            self.preview_desc_label.configure(text="Using user-specified custom icon.")
+        elif source_desc == "application_extracted":
+            self.preview_status_label.configure(text="Application Icon (Extracted)")
+            self.preview_desc_label.configure(text="Extracted automatically from target application.")
+        elif source_desc == "fallback_default":
+            self.preview_status_label.configure(text="Default Icon")
+            self.preview_desc_label.configure(text="No icon found on target; using DALT default icon.")
+        else:
+            self.preview_status_label.configure(text="No Icon")
+            self.preview_desc_label.configure(text="Select a valid file to resolve an icon.")
+
+    def save(self):
+        name = self.name_entry.get().strip()
+        target = self.target_entry.get().strip()
+        custom = self.icon_entry.get().strip() or None
+
+        if not target:
+            self.error_label.configure(text="Error: Target file is required.")
+            self.target_entry.configure(border_color="red")
+            return
+        if not os.path.exists(os.path.expanduser(target)):
+            self.error_label.configure(text="Error: Target file does not exist on disk.")
+            self.target_entry.configure(border_color="red")
+            return
+
+        if not name:
+            name = os.path.splitext(os.path.basename(target))[0]
+
+        cache_icon_path = os.path.join(ICONS_CACHE_DIR, f"{self.shortcut_id}.png")
+        resolve_icon(target, custom, cache_icon_path)
+
+        shortcut_data: Shortcut = {
+            "id": self.shortcut_id,
+            "name": name,
+            "target_path": target,
+            "custom_icon_path": custom,
+            "icon_cache_path": cache_icon_path,
+        }
+        self.on_save(shortcut_data)
+        self.destroy()
+
+_ALL_LAZY_FRAMES = ("butterwalk", "spacebar", "controller", "macros", "autofollowing", "credits")
+
 class DarkAgesApp(ctk.CTk):
+    def __getattr__(self, item: str):
+        if not item.startswith("_"):
+            for frame_name in _ALL_LAZY_FRAMES:
+                if frame_name not in self._initialized_frames:
+                    self._ensure_frame_setup(frame_name)
+                    if item in self.__dict__:
+                        return self.__dict__[item]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{item}'")
+
+    def _ensure_frame_setup(self, name: str) -> None:
+        if name in self._initialized_frames:
+            return
+        self._initialized_frames.add(name)
+        if name == "butterwalk":
+            self._setup_butterwalk_frame()
+        elif name == "spacebar":
+            self._setup_spacebar_frame()
+        elif name == "controller":
+            self._setup_controller_frame()
+        elif name == "macros":
+            self._setup_macro_frame()
+        elif name == "autofollowing":
+            self._setup_autofollowing_frame()
+        elif name == "credits":
+            self._setup_credits_frame()
+
     def __init__(self, macro_feature: MacroFeature, loop: asyncio.AbstractEventLoop):
         super().__init__()
 
@@ -398,7 +646,7 @@ class DarkAgesApp(ctk.CTk):
         # Sidebar / Navigation
         self.navigation_frame = ctk.CTkFrame(self, corner_radius=0)
         self.navigation_frame.grid(row=0, column=0, sticky="nsew")
-        self.navigation_frame.grid_rowconfigure(6, weight=1)
+        self.navigation_frame.grid_rowconfigure(8, weight=1)
 
         self.navigation_frame_label = ctk.CTkLabel(self.navigation_frame, text="DarkAges Linux Tool", 
                                                  font=ctk.CTkFont(size=15, weight="bold"))
@@ -414,7 +662,7 @@ class DarkAgesApp(ctk.CTk):
                                               anchor="w", command=self.butterwalk_button_event)
         self.butterwalk_button.grid(row=2, column=0, sticky="ew")
 
-        self.spacebar_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Spacebar Uninterrupted Repeat",
+        self.spacebar_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Continuous Assail",
                                              fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
                                              anchor="w", command=self.spacebar_button_event)
         self.spacebar_button.grid(row=3, column=0, sticky="ew")
@@ -429,23 +677,34 @@ class DarkAgesApp(ctk.CTk):
                                          anchor="w", command=self.macro_button_event)
         self.macro_button.grid(row=5, column=0, sticky="ew")
 
+        self.autofollow_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Autofollowing",
+                                                fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+                                                anchor="w", command=self.autofollow_button_event)
+        self.autofollow_button.grid(row=6, column=0, sticky="ew")
+
+        self.credits_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Credits",
+                                            fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+                                            anchor="w", command=self.credits_button_event)
+        self.credits_button.grid(row=7, column=0, sticky="ew")
+
         # Create frames
         self.home_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
         self.butterwalk_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
         self.spacebar_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
         self.controller_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
         self.macro_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.autofollowing_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
+        self.credits_frame = ctk.CTkScrollableFrame(self, corner_radius=0, fg_color="transparent")
         
         enable_linux_scroll(self.home_frame)
         enable_linux_scroll(self.butterwalk_frame)
         enable_linux_scroll(self.spacebar_frame)
         enable_linux_scroll(self.controller_frame)
+        enable_linux_scroll(self.autofollowing_frame)
+        enable_linux_scroll(self.credits_frame)
 
+        self._initialized_frames: set[str] = {"home"}
         self._setup_home_frame()
-        self._setup_butterwalk_frame()
-        self._setup_spacebar_frame()
-        self._setup_controller_frame()
-        self._setup_macro_frame()
 
         # Select default frame
         self.select_frame_by_name("home")
@@ -471,18 +730,43 @@ class DarkAgesApp(ctk.CTk):
     def _setup_home_frame(self):
         self.home_frame.grid_columnconfigure(0, weight=1)
         self.home_label = ctk.CTkLabel(self.home_frame, text="General Status", font=ctk.CTkFont(size=24, weight="bold"))
-        self.home_label.pack(padx=20, pady=30)
+        self.home_label.pack(padx=20, pady=(20, 15))
         
+        # Quick Launch Section (DarkAges clients and tools)
+        self.quick_launch_container = ctk.CTkFrame(self.home_frame)
+        self.quick_launch_container.pack(fill="x", padx=20, pady=(0, 10))
+
+        ql_header = ctk.CTkFrame(self.quick_launch_container, fg_color="transparent")
+        ql_header.pack(fill="x", padx=15, pady=(12, 6))
+
+        ql_title_box = ctk.CTkFrame(ql_header, fg_color="transparent")
+        ql_title_box.pack(side="left")
+        ctk.CTkLabel(ql_title_box, text="Quick Launch (Clients & Tools)", font=ctk.CTkFont(size=16, weight="bold")).pack(anchor="w")
+        ctk.CTkLabel(ql_title_box, text="Launch DarkAges clients and tools directly from DALT.", font=ctk.CTkFont(size=11), text_color="gray").pack(anchor="w")
+
+        self.add_shortcut_btn = ctk.CTkButton(
+            ql_header,
+            text="+ Add New",
+            width=100,
+            command=self.open_shortcut_editor
+        )
+        self.add_shortcut_btn.pack(side="right")
+
+        self.shortcuts_list_frame = ctk.CTkFrame(self.quick_launch_container, fg_color="transparent")
+        self.shortcuts_list_frame.pack(fill="x", padx=15, pady=(0, 12))
+
+        self.refresh_shortcuts_display()
+
         # Window Hooks Management
         hooks_container = ctk.CTkFrame(self.home_frame)
         hooks_container.pack(fill="x", padx=20, pady=10)
         
-        ctk.CTkLabel(hooks_container, text="Active Window Hooks:", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(10, 5))
-        ctk.CTkLabel(hooks_container, text="(The tool will only arm when these titles are focused)", font=ctk.CTkFont(size=10), text_color="gray").pack()
+        ctk.CTkLabel(hooks_container, text="Active Window Hooks:", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(12, 4))
+        ctk.CTkLabel(hooks_container, text="(The tool will only arm when these titles are focused)", font=ctk.CTkFont(size=10), text_color="gray").pack(pady=(0, 8))
 
         # Input to add new hook
         hook_input_frame = ctk.CTkFrame(hooks_container, fg_color="transparent")
-        hook_input_frame.pack(fill="x", padx=20, pady=10)
+        hook_input_frame.pack(fill="x", padx=20, pady=(0, 10))
         
         self.hook_entry = ctk.CTkEntry(hook_input_frame, placeholder_text="Enter Window Title...")
         self.hook_entry.pack(side="left", fill="x", expand=True)
@@ -490,22 +774,32 @@ class DarkAgesApp(ctk.CTk):
         
         ctk.CTkButton(hook_input_frame, text="+ Add", width=60, command=self.add_hook).pack(side="left", padx=(10, 0))
 
-        # List of hooks
-        self.hooks_list_frame = ctk.CTkFrame(hooks_container, fg_color="transparent")
-        self.hooks_list_frame.pack(fill="x", padx=20, pady=(0, 10))
+        # Box / Table for active window hooks (displays at most 5 before scrolling)
+        self.hooks_table_frame = ctk.CTkFrame(hooks_container, fg_color=("gray85", "#202020"), corner_radius=6)
+        self.hooks_table_frame.pack(fill="x", padx=20, pady=(0, 12))
+
+        # Table header
+        hooks_header = ctk.CTkFrame(self.hooks_table_frame, fg_color=("gray75", "#2A2A2A"), corner_radius=4)
+        hooks_header.pack(fill="x", padx=4, pady=(4, 2))
+        ctk.CTkLabel(hooks_header, text="Window Title / Hook", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left", padx=10, pady=4)
+        ctk.CTkLabel(hooks_header, text="Action", font=ctk.CTkFont(size=12, weight="bold"), text_color="gray").pack(side="right", padx=10, pady=4)
+
+        self.hooks_list_frame = ctk.CTkScrollableFrame(self.hooks_table_frame, height=195, fg_color="transparent")
+        self.hooks_list_frame.pack(fill="x", padx=4, pady=(0, 4))
+        enable_linux_scroll(self.hooks_list_frame)
         
         self.refresh_hooks_display()
 
         # Input Suppression Toggle
         self.suppress_frame = ctk.CTkFrame(self.home_frame, fg_color="transparent")
-        self.suppress_frame.pack(pady=20)
+        self.suppress_frame.pack(pady=15)
         
         self.suppress_switch = ctk.CTkSwitch(self.suppress_frame, text="Suppress Trigger Keys", 
                                             command=self.toggle_suppression,
                                             progress_color="orange")
         self.suppress_switch.pack(side="top")
         
-        ctk.CTkLabel(self.suppress_frame, text="(Prevents trigger keys from reaching the game)", 
+        ctk.CTkLabel(self.suppress_frame, text="(Suppresses triggers: ` / ~, F-keys, Home, Del, End, Ins; PgUp / PgDn only if bound to macro/hotkey)", 
                     font=ctk.CTkFont(size=10), text_color="gray").pack(pady=5)
 
     def add_hook(self):
@@ -527,12 +821,149 @@ class DarkAgesApp(ctk.CTk):
     def refresh_hooks_display(self):
         for widget in self.hooks_list_frame.winfo_children(): widget.destroy()
         
+        if not state["window_hooks"]:
+            placeholder = ctk.CTkLabel(
+                self.hooks_list_frame,
+                text="No window hooks configured. Add a title above.",
+                font=ctk.CTkFont(size=12),
+                text_color="gray"
+            )
+            placeholder.pack(pady=20)
+            return
+
         for hook in state["window_hooks"]:
-            f = ctk.CTkFrame(self.hooks_list_frame, fg_color="#2B2B2B")
+            f = ctk.CTkFrame(self.hooks_list_frame, fg_color=("gray90", "#2B2B2B"), corner_radius=4)
             f.pack(fill="x", pady=2)
-            ctk.CTkLabel(f, text=hook).pack(side="left", padx=10)
-            ctk.CTkButton(f, text="×", width=20, height=20, fg_color="transparent", text_color="red", 
-                         hover_color="#331111", command=lambda v=hook: self.remove_hook(v)).pack(side="right", padx=5)
+            ctk.CTkLabel(f, text=hook, font=ctk.CTkFont(size=13)).pack(side="left", padx=10, pady=4)
+            ctk.CTkButton(
+                f, text="×", width=24, height=24,
+                fg_color="transparent", text_color="red", 
+                hover_color=("#E0B0B0", "#331111"),
+                font=ctk.CTkFont(size=14, weight="bold"),
+                command=lambda v=hook: self.remove_hook(v)
+            ).pack(side="right", padx=6, pady=4)
+
+    def refresh_shortcuts_display(self):
+        for widget in self.shortcuts_list_frame.winfo_children():
+            widget.destroy()
+
+        self._shortcut_photos = {}
+
+        if not state["shortcuts"]:
+            placeholder = ctk.CTkLabel(
+                self.shortcuts_list_frame,
+                text="No launch shortcuts added yet. Click '+ Add New' to configure quick launch shortcuts.",
+                font=ctk.CTkFont(size=12),
+                text_color="gray"
+            )
+            placeholder.pack(pady=15)
+            return
+
+        for sc in state["shortcuts"]:
+            card = ctk.CTkFrame(self.shortcuts_list_frame, fg_color=("gray90", "#2B2B2B"), corner_radius=6)
+            card.pack(fill="x", pady=3)
+
+            # Icon
+            icon_lbl = ctk.CTkLabel(card, text="", width=36, height=36)
+            icon_lbl.pack(side="left", padx=(10, 8), pady=6)
+
+            cache_path = sc.get("icon_cache_path")
+            if not cache_path or not os.path.exists(cache_path):
+                cache_path = os.path.join(ICONS_CACHE_DIR, f"{sc['id']}.png")
+                resolve_icon(sc.get("target_path"), sc.get("custom_icon_path"), cache_path)
+                sc["icon_cache_path"] = cache_path
+
+            if os.path.exists(cache_path):
+                try:
+                    photo = tk.PhotoImage(file=cache_path)
+                    self._shortcut_photos[sc["id"]] = photo
+                    icon_lbl.configure(image=photo)
+                except Exception:
+                    icon_lbl.configure(text="🚀")
+            else:
+                icon_lbl.configure(text="🚀")
+
+            # Info (Name and Target path)
+            info_frame = ctk.CTkFrame(card, fg_color="transparent")
+            info_frame.pack(side="left", fill="both", expand=True, padx=5, pady=6)
+            ctk.CTkLabel(info_frame, text=sc["name"], font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w")
+
+            disp_path = sc["target_path"]
+            if len(disp_path) > 55:
+                disp_path = "..." + disp_path[-52:]
+            ctk.CTkLabel(info_frame, text=disp_path, font=ctk.CTkFont(size=10), text_color="gray").pack(anchor="w")
+
+            # Actions (Launch, Edit, Delete)
+            btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+            btn_frame.pack(side="right", padx=10, pady=6)
+
+            launch_btn = ctk.CTkButton(
+                btn_frame,
+                text="▶ Launch",
+                width=80,
+                height=28,
+                fg_color="#2E7D32",
+                hover_color="#1B5E20",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                command=lambda s=sc: self.launch_target_shortcut(s)
+            )
+            launch_btn.pack(side="left", padx=4)
+
+            edit_btn = ctk.CTkButton(
+                btn_frame,
+                text="Edit",
+                width=45,
+                height=28,
+                fg_color="#4444AA",
+                hover_color="#333388",
+                font=ctk.CTkFont(size=11),
+                command=lambda s=sc: self.open_shortcut_editor(s)
+            )
+            edit_btn.pack(side="left", padx=4)
+
+            del_btn = ctk.CTkButton(
+                btn_frame,
+                text="×",
+                width=28,
+                height=28,
+                fg_color="#AA4444",
+                hover_color="#882222",
+                font=ctk.CTkFont(size=14, weight="bold"),
+                command=lambda s=sc: self.delete_shortcut(s)
+            )
+            del_btn.pack(side="left", padx=2)
+
+    def open_shortcut_editor(self, shortcut_to_edit=None):
+        editor = ShortcutEditor(self, self.save_shortcut_callback, shortcut_to_edit=shortcut_to_edit)
+        editor.grab_set()
+
+    def save_shortcut_callback(self, shortcut_data: Shortcut):
+        existing_idx = None
+        for i, s in enumerate(state["shortcuts"]):
+            if s["id"] == shortcut_data["id"]:
+                existing_idx = i
+                break
+        if existing_idx is not None:
+            state["shortcuts"][existing_idx] = shortcut_data
+        else:
+            state["shortcuts"].append(shortcut_data)
+        save_shortcuts(state["shortcuts"])
+        self.refresh_shortcuts_display()
+
+    def delete_shortcut(self, shortcut: Shortcut):
+        cache = shortcut.get("icon_cache_path")
+        if cache and os.path.exists(cache):
+            try:
+                os.remove(cache)
+            except OSError:
+                pass
+        state["shortcuts"] = [s for s in state["shortcuts"] if s["id"] != shortcut["id"]]
+        save_shortcuts(state["shortcuts"])
+        self.refresh_shortcuts_display()
+
+    def launch_target_shortcut(self, shortcut: Shortcut):
+        ok, msg = launch_shortcut(shortcut)
+        state["last_event"] = msg
 
     def toggle_suppression(self):
         import input_hub
@@ -569,27 +1000,57 @@ class DarkAgesApp(ctk.CTk):
 
         self.multiplier_label = ctk.CTkLabel(self.butterwalk_frame, text=f"Multiplier: {state['multiplier']}x", font=ctk.CTkFont(size=16, weight="bold"))
         self.multiplier_label.pack(padx=20, pady=(15, 0))
+
+        self.multiplier_desc = ctk.CTkLabel(
+            self.butterwalk_frame,
+            text="How many times the keystroke is repeated at the ms rate selected.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.multiplier_desc.pack(padx=20, pady=(2, 6))
         
         self.multiplier_slider = ctk.CTkSlider(self.butterwalk_frame, from_=1, to=5, number_of_steps=4, command=self.set_multiplier)
         self.multiplier_slider.set(state["multiplier"])
-        self.multiplier_slider.pack(padx=20, pady=10, fill="x")
+        self.multiplier_slider.pack(padx=20, pady=(0, 15), fill="x")
+        self._bw_slider_dragging = False
+        self.multiplier_slider.bind("<Button-1>", lambda e: setattr(self, "_bw_slider_dragging", True), add="+")
+        self.multiplier_slider.bind("<ButtonRelease-1>", lambda e: setattr(self, "_bw_slider_dragging", False), add="+")
+
+        # Repeat Speed (ms)
+        self.bw_speed_label = ctk.CTkLabel(self.butterwalk_frame, text=f"Repeat Speed: {state['butterwalk_delay_ms']} ms", font=ctk.CTkFont(size=16, weight="bold"))
+        self.bw_speed_label.pack(padx=20, pady=(10, 0))
+
+        self.bw_speed_desc = ctk.CTkLabel(
+            self.butterwalk_frame,
+            text="How long, in milliseconds, the program waits between repeating the keystrokes.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.bw_speed_desc.pack(padx=20, pady=(2, 6))
+
+        self.bw_speed_slider = ctk.CTkSlider(self.butterwalk_frame, from_=1, to=100, number_of_steps=99, command=self.set_butterwalk_delay)
+        self.bw_speed_slider.set(state["butterwalk_delay_ms"])
+        self.bw_speed_slider.pack(padx=20, pady=(0, 10), fill="x")
+        self._bw_speed_slider_dragging = False
+        self.bw_speed_slider.bind("<Button-1>", lambda e: setattr(self, "_bw_speed_slider_dragging", True), add="+")
+        self.bw_speed_slider.bind("<ButtonRelease-1>", lambda e: setattr(self, "_bw_speed_slider_dragging", False), add="+")
 
         self.input_display_label = ctk.CTkLabel(self.butterwalk_frame, text="Keys Pressed: —", font=ctk.CTkFont(family="monospace", size=14))
         self.input_display_label.pack(padx=20, pady=(20, 10))
 
     def _setup_spacebar_frame(self):
-        self.space_title = ctk.CTkLabel(self.spacebar_frame, text="Spacebar Uninterrupted Repeat", font=ctk.CTkFont(size=24, weight="bold"))
+        self.space_title = ctk.CTkLabel(self.spacebar_frame, text="Continuous Assail", font=ctk.CTkFont(size=24, weight="bold"))
         self.space_title.pack(padx=20, pady=(20, 10))
 
         self.space_desc = ctk.CTkLabel(
             self.spacebar_frame,
-            text="Continuously repeats Spacebar inputs while held down, even during macro execution.",
+            text="Continuously repeats Spacebar inputs (Assail) while held down, even during macro execution.",
             font=ctk.CTkFont(size=12),
             text_color="gray"
         )
         self.space_desc.pack(padx=20, pady=(0, 15))
 
-        self.space_switch = ctk.CTkSwitch(self.spacebar_frame, text="Enable Spacebar Uninterrupted Repeat", command=self.toggle_space)
+        self.space_switch = ctk.CTkSwitch(self.spacebar_frame, text="Enable Continuous Assail", command=self.toggle_space)
         self.space_switch.pack(padx=20, pady=8)
         if state["space_enabled"]: self.space_switch.select()
 
@@ -608,10 +1069,40 @@ class DarkAgesApp(ctk.CTk):
 
         self.space_multiplier_label = ctk.CTkLabel(self.spacebar_frame, text=f"Repeat Multiplier: {state['space_multiplier']}x", font=ctk.CTkFont(size=16, weight="bold"))
         self.space_multiplier_label.pack(padx=20, pady=(15, 0))
+
+        self.space_multiplier_desc = ctk.CTkLabel(
+            self.spacebar_frame,
+            text="How many times the keystroke is repeated at the ms rate selected.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.space_multiplier_desc.pack(padx=20, pady=(2, 6))
         
         self.space_multiplier_slider = ctk.CTkSlider(self.spacebar_frame, from_=1, to=5, number_of_steps=4, command=self.set_space_multiplier)
         self.space_multiplier_slider.set(state["space_multiplier"])
-        self.space_multiplier_slider.pack(padx=20, pady=10, fill="x")
+        self.space_multiplier_slider.pack(padx=20, pady=(0, 15), fill="x")
+        self._space_slider_dragging = False
+        self.space_multiplier_slider.bind("<Button-1>", lambda e: setattr(self, "_space_slider_dragging", True), add="+")
+        self.space_multiplier_slider.bind("<ButtonRelease-1>", lambda e: setattr(self, "_space_slider_dragging", False), add="+")
+
+        # Repeat Speed (ms)
+        self.space_speed_label = ctk.CTkLabel(self.spacebar_frame, text=f"Repeat Speed: {state['space_delay_ms']} ms", font=ctk.CTkFont(size=16, weight="bold"))
+        self.space_speed_label.pack(padx=20, pady=(10, 0))
+
+        self.space_speed_desc = ctk.CTkLabel(
+            self.spacebar_frame,
+            text="How long, in milliseconds, the program waits between repeating the keystrokes.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.space_speed_desc.pack(padx=20, pady=(2, 6))
+
+        self.space_speed_slider = ctk.CTkSlider(self.spacebar_frame, from_=1, to=100, number_of_steps=99, command=self.set_space_delay)
+        self.space_speed_slider.set(state["space_delay_ms"])
+        self.space_speed_slider.pack(padx=20, pady=(0, 10), fill="x")
+        self._space_speed_slider_dragging = False
+        self.space_speed_slider.bind("<Button-1>", lambda e: setattr(self, "_space_speed_slider_dragging", True), add="+")
+        self.space_speed_slider.bind("<ButtonRelease-1>", lambda e: setattr(self, "_space_speed_slider_dragging", False), add="+")
 
         self.space_input_display_label = ctk.CTkLabel(self.spacebar_frame, text="Keys Pressed: —", font=ctk.CTkFont(family="monospace", size=14))
         self.space_input_display_label.pack(padx=20, pady=(20, 10))
@@ -677,6 +1168,9 @@ class DarkAgesApp(ctk.CTk):
         )
         self.mouse_sens_slider.set(state["mouse_sensitivity"])
         self.mouse_sens_slider.pack(padx=20, pady=8, fill="x")
+        self._sens_slider_dragging = False
+        self.mouse_sens_slider.bind("<Button-1>", lambda e: setattr(self, "_sens_slider_dragging", True), add="+")
+        self.mouse_sens_slider.bind("<ButtonRelease-1>", lambda e: setattr(self, "_sens_slider_dragging", False), add="+")
 
         dpi_frame = ctk.CTkFrame(self.controller_frame, fg_color="transparent")
         dpi_frame.pack(padx=20, pady=5)
@@ -793,16 +1287,56 @@ class DarkAgesApp(ctk.CTk):
             self.after_cancel(self._refresh_timer)
         self._refresh_timer = self.after(100, self.refresh_macro_list)
 
-    def play_macro(self, macro):
-        if self.loop.is_running():
-            asyncio.run_coroutine_threadsafe(self.macro_feature._play_macro(macro), self.loop)
+    def _setup_autofollowing_frame(self):
+        self.af_title = ctk.CTkLabel(self.autofollowing_frame, text="Autofollowing", font=ctk.CTkFont(size=24, weight="bold"))
+        self.af_title.pack(padx=20, pady=(20, 15))
+
+        notice_box = ctk.CTkFrame(self.autofollowing_frame, fg_color=("gray85", "gray20"), corner_radius=8)
+        notice_box.pack(padx=20, pady=10, fill="x")
+
+        message = (
+            "Autofollowing Features will not be added to DALT. "
+            "Please use an alternative program to control autofollowing. "
+            "The only reason this tab exists is solely so I don't get messages asking for this feature."
+        )
+        self.af_text = ctk.CTkLabel(
+            notice_box,
+            text=message,
+            font=ctk.CTkFont(size=14),
+            wraplength=600,
+            justify="center"
+        )
+        self.af_text.pack(padx=20, pady=25)
+
+    def _setup_credits_frame(self):
+        self.credits_title = ctk.CTkLabel(self.credits_frame, text="DALT is brought to you by the following Aislings", font=ctk.CTkFont(size=24, weight="bold"))
+        self.credits_title.pack(padx=20, pady=(20, 15))
+
+        notice_box = ctk.CTkFrame(self.credits_frame, fg_color=("gray85", "gray20"), corner_radius=8)
+        notice_box.pack(padx=20, pady=10, fill="x")
+
+        self.credits_text = ctk.CTkLabel(
+            notice_box,
+            text="""Initial Coding and Setup, Initial Macro and Butterwalk implementation: Phever - https://github.com/phever
+
+GUI Implementation and Troubleshooting: Aon - https://github.com/FreyaNile
+
+Feature implementation, Optimization, and Polishing: Iglis - https://github.com/kryptosfang""",
+            font=ctk.CTkFont(size=14),
+            wraplength=600,
+            justify="center"
+        )
+        self.credits_text.pack(padx=20, pady=25)
 
     def select_frame_by_name(self, name):
+        self._ensure_frame_setup(name)
         self.home_button.configure(fg_color=("gray75", "gray25") if name == "home" else "transparent")
         self.butterwalk_button.configure(fg_color=("gray75", "gray25") if name == "butterwalk" else "transparent")
         self.spacebar_button.configure(fg_color=("gray75", "gray25") if name == "spacebar" else "transparent")
         self.controller_button.configure(fg_color=("gray75", "gray25") if name == "controller" else "transparent")
         self.macro_button.configure(fg_color=("gray75", "gray25") if name == "macros" else "transparent")
+        self.autofollow_button.configure(fg_color=("gray75", "gray25") if name == "autofollowing" else "transparent")
+        self.credits_button.configure(fg_color=("gray75", "gray25") if name == "credits" else "transparent")
 
         if name == "home": self.home_frame.grid(row=0, column=1, sticky="nsew")
         else: self.home_frame.grid_forget()
@@ -819,11 +1353,19 @@ class DarkAgesApp(ctk.CTk):
         if name == "macros": self.macro_frame.grid(row=0, column=1, sticky="nsew")
         else: self.macro_frame.grid_forget()
 
+        if name == "autofollowing": self.autofollowing_frame.grid(row=0, column=1, sticky="nsew")
+        else: self.autofollowing_frame.grid_forget()
+
+        if name == "credits": self.credits_frame.grid(row=0, column=1, sticky="nsew")
+        else: self.credits_frame.grid_forget()
+
     def home_button_event(self): self.select_frame_by_name("home")
     def butterwalk_button_event(self): self.select_frame_by_name("butterwalk")
     def spacebar_button_event(self): self.select_frame_by_name("spacebar")
     def controller_button_event(self): self.select_frame_by_name("controller")
     def macro_button_event(self): self.select_frame_by_name("macros")
+    def autofollow_button_event(self): self.select_frame_by_name("autofollowing")
+    def credits_button_event(self): self.select_frame_by_name("credits")
 
     def toggle_bw(self): state["butterwalk"] = self.bw_switch.get() == 1
     def toggle_zxcv(self): 
@@ -880,15 +1422,35 @@ class DarkAgesApp(ctk.CTk):
 
     def set_multiplier(self, value): 
         from state import save_config
-        state["multiplier"] = int(value)
-        self.multiplier_label.configure(text=f"Multiplier: {state['multiplier']}x")
-        save_config()
+        val = int(round(value))
+        if state["multiplier"] != val:
+            state["multiplier"] = val
+            self.multiplier_label.configure(text=f"Multiplier: {state['multiplier']}x")
+            save_config()
 
     def set_space_multiplier(self, value):
         from state import save_config
-        state["space_multiplier"] = int(value)
-        self.space_multiplier_label.configure(text=f"Repeat Multiplier: {state['space_multiplier']}x")
-        save_config()
+        val = int(round(value))
+        if state["space_multiplier"] != val:
+            state["space_multiplier"] = val
+            self.space_multiplier_label.configure(text=f"Repeat Multiplier: {state['space_multiplier']}x")
+            save_config()
+
+    def set_butterwalk_delay(self, value):
+        from state import save_config
+        val = int(round(value))
+        if state["butterwalk_delay_ms"] != val:
+            state["butterwalk_delay_ms"] = val
+            self.bw_speed_label.configure(text=f"Repeat Speed: {state['butterwalk_delay_ms']} ms")
+            save_config()
+
+    def set_space_delay(self, value):
+        from state import save_config
+        val = int(round(value))
+        if state["space_delay_ms"] != val:
+            state["space_delay_ms"] = val
+            self.space_speed_label.configure(text=f"Repeat Speed: {state['space_delay_ms']} ms")
+            save_config()
 
     def start_hotkey_binding(self, target: str):
         state["listening_for_hotkey"] = target
@@ -942,59 +1504,80 @@ class DarkAgesApp(ctk.CTk):
             state["captured_hotkey"] = None
             if target == "butterwalk":
                 state["butterwalk_hotkey"] = combo
-                self.bw_hotkey_entry.delete(0, 'end')
-                self.bw_hotkey_entry.insert(0, combo)
-                self.bw_hotkey_bind_btn.configure(text="Record", state="normal")
+                if "butterwalk" in self._initialized_frames:
+                    self.bw_hotkey_entry.delete(0, 'end')
+                    self.bw_hotkey_entry.insert(0, combo)
+                    self.bw_hotkey_bind_btn.configure(text="Record", state="normal")
             elif target == "controller":
                 state["controller_hotkey"] = combo
-                self.ctrl_hotkey_entry.delete(0, 'end')
-                self.ctrl_hotkey_entry.insert(0, combo)
-                self.ctrl_hotkey_bind_btn.configure(text="Record", state="normal")
+                if "controller" in self._initialized_frames:
+                    self.ctrl_hotkey_entry.delete(0, 'end')
+                    self.ctrl_hotkey_entry.insert(0, combo)
+                    self.ctrl_hotkey_bind_btn.configure(text="Record", state="normal")
             elif target == "space":
                 state["space_hotkey"] = combo
-                self.space_hotkey_entry.delete(0, 'end')
-                self.space_hotkey_entry.insert(0, combo)
-                self.space_hotkey_bind_btn.configure(text="Record", state="normal")
+                if "spacebar" in self._initialized_frames:
+                    self.space_hotkey_entry.delete(0, 'end')
+                    self.space_hotkey_entry.insert(0, combo)
+                    self.space_hotkey_bind_btn.configure(text="Record", state="normal")
             from state import save_config
             save_config()
 
-        # Sync switches if they were changed via hotkey
-        if state["butterwalk"] and self.bw_switch.get() == 0: self.bw_switch.select()
-        elif not state["butterwalk"] and self.bw_switch.get() == 1: self.bw_switch.deselect()
-        
-        if state["zxcv_enabled"] and self.zxcv_switch.get() == 0: self.zxcv_switch.select()
-        elif not state["zxcv_enabled"] and self.zxcv_switch.get() == 1: self.zxcv_switch.deselect()
+        # Sync switches and controls for initialized tabs
+        if "butterwalk" in self._initialized_frames:
+            if state["butterwalk"] and self.bw_switch.get() == 0: self.bw_switch.select()
+            elif not state["butterwalk"] and self.bw_switch.get() == 1: self.bw_switch.deselect()
+            
+            if state["zxcv_enabled"] and self.zxcv_switch.get() == 0: self.zxcv_switch.select()
+            elif not state["zxcv_enabled"] and self.zxcv_switch.get() == 1: self.zxcv_switch.deselect()
 
-        if state["controller_enabled"] and self.controller_switch.get() == 0: self.controller_switch.select()
-        elif not state["controller_enabled"] and self.controller_switch.get() == 1: self.controller_switch.deselect()
+            self.multiplier_label.configure(text=f"Multiplier: {state['multiplier']}x")
+            if not getattr(self, "_bw_slider_dragging", False) and int(round(self.multiplier_slider.get())) != state["multiplier"]:
+                self.multiplier_slider.set(state["multiplier"])
 
-        if state["dpad_enabled"] and self.dpad_switch.get() == 0: self.dpad_switch.select()
-        elif not state["dpad_enabled"] and self.dpad_switch.get() == 1: self.dpad_switch.deselect()
+            self.bw_speed_label.configure(text=f"Repeat Speed: {state['butterwalk_delay_ms']} ms")
+            if not getattr(self, "_bw_speed_slider_dragging", False) and int(round(self.bw_speed_slider.get())) != state["butterwalk_delay_ms"]:
+                self.bw_speed_slider.set(state["butterwalk_delay_ms"])
 
-        if state["joystick_enabled"] and self.joystick_switch.get() == 0: self.joystick_switch.select()
-        elif not state["joystick_enabled"] and self.joystick_switch.get() == 1: self.joystick_switch.deselect()
+            keys = ", ".join(k.replace("KEY_", "") for k in state["physical_keys_down"]) or "—"
+            self.input_display_label.configure(text=f"Keys Pressed: {keys}")
 
-        if state["right_stick_mouse_enabled"] and self.mouse_control_switch.get() == 0: self.mouse_control_switch.select()
-        elif not state["right_stick_mouse_enabled"] and self.mouse_control_switch.get() == 1: self.mouse_control_switch.deselect()
+        if "spacebar" in self._initialized_frames:
+            if state["space_enabled"] and self.space_switch.get() == 0: self.space_switch.select()
+            elif not state["space_enabled"] and self.space_switch.get() == 1: self.space_switch.deselect()
 
-        if state["space_enabled"] and self.space_switch.get() == 0: self.space_switch.select()
-        elif not state["space_enabled"] and self.space_switch.get() == 1: self.space_switch.deselect()
-        
-        self.multiplier_label.configure(text=f"Multiplier: {state['multiplier']}x")
-        self.multiplier_slider.set(state["multiplier"])
+            self.space_multiplier_label.configure(text=f"Repeat Multiplier: {state['space_multiplier']}x")
+            if not getattr(self, "_space_slider_dragging", False) and int(round(self.space_multiplier_slider.get())) != state["space_multiplier"]:
+                self.space_multiplier_slider.set(state["space_multiplier"])
 
-        self.space_multiplier_label.configure(text=f"Repeat Multiplier: {state['space_multiplier']}x")
-        self.space_multiplier_slider.set(state["space_multiplier"])
+            self.space_speed_label.configure(text=f"Repeat Speed: {state['space_delay_ms']} ms")
+            if not getattr(self, "_space_speed_slider_dragging", False) and int(round(self.space_speed_slider.get())) != state["space_delay_ms"]:
+                self.space_speed_slider.set(state["space_delay_ms"])
 
-        self.mouse_sens_label.configure(text=f"Right Stick Sensitivity: {state['mouse_sensitivity']}% of {state['mouse_dpi']} DPI")
-        self.mouse_sens_slider.set(state["mouse_sensitivity"])
-        
-        keys = ", ".join(k.replace("KEY_", "") for k in state["physical_keys_down"]) or "—"
-        self.input_display_label.configure(text=f"Keys Pressed: {keys}")
-        self.space_input_display_label.configure(text=f"Keys Pressed: {keys}")
-        rx, ry = state.get("right_stick_x", 0.0), state.get("right_stick_y", 0.0)
-        stick_info = f" | RS: ({rx:+.2f}, {ry:+.2f})" if (rx != 0.0 or ry != 0.0) else ""
-        self.ctrl_input_display_label.configure(text=f"Keys / Axes Pressed: {keys}{stick_info}")
+            keys = ", ".join(k.replace("KEY_", "") for k in state["physical_keys_down"]) or "—"
+            self.space_input_display_label.configure(text=f"Keys Pressed: {keys}")
+
+        if "controller" in self._initialized_frames:
+            if state["controller_enabled"] and self.controller_switch.get() == 0: self.controller_switch.select()
+            elif not state["controller_enabled"] and self.controller_switch.get() == 1: self.controller_switch.deselect()
+
+            if state["dpad_enabled"] and self.dpad_switch.get() == 0: self.dpad_switch.select()
+            elif not state["dpad_enabled"] and self.dpad_switch.get() == 1: self.dpad_switch.deselect()
+
+            if state["joystick_enabled"] and self.joystick_switch.get() == 0: self.joystick_switch.select()
+            elif not state["joystick_enabled"] and self.joystick_switch.get() == 1: self.joystick_switch.deselect()
+
+            if state["right_stick_mouse_enabled"] and self.mouse_control_switch.get() == 0: self.mouse_control_switch.select()
+            elif not state["right_stick_mouse_enabled"] and self.mouse_control_switch.get() == 1: self.mouse_control_switch.deselect()
+
+            self.mouse_sens_label.configure(text=f"Right Stick Sensitivity: {state['mouse_sensitivity']}% of {state['mouse_dpi']} DPI")
+            if not getattr(self, "_sens_slider_dragging", False) and int(round(self.mouse_sens_slider.get())) != state["mouse_sensitivity"]:
+                self.mouse_sens_slider.set(state["mouse_sensitivity"])
+
+            keys = ", ".join(k.replace("KEY_", "") for k in state["physical_keys_down"]) or "—"
+            rx, ry = state.get("right_stick_x", 0.0), state.get("right_stick_y", 0.0)
+            stick_info = f" | RS: ({rx:+.2f}, {ry:+.2f})" if (rx != 0.0 or ry != 0.0) else ""
+            self.ctrl_input_display_label.configure(text=f"Keys / Axes Pressed: {keys}{stick_info}")
         
         # Update Footer Monitoring
         self.footer_last_event.configure(text=f"Last Event: {state['last_event']}")
@@ -1005,6 +1588,11 @@ class DarkAgesApp(ctk.CTk):
 def run_gui(macro_feature, loop):
     app = DarkAgesApp(macro_feature, loop)
     def on_closing():
+        try:
+            app.withdraw()
+            app.update_idletasks()
+        except Exception:
+            pass
         state["running"] = False
         app.destroy()
     app.protocol("WM_DELETE_WINDOW", on_closing)
