@@ -433,6 +433,8 @@ def _draw_autofollowing(canvas: Canvas, top: int) -> None:
     row += 2
     canvas.put(row, 4, "Please use an alternative program to control autofollowing.", theme.muted())
     row += 2
+    canvas.put(row, 4, "DALT is not intended to be used on inactive windows, hence no auto-following and no looped macros without holding your hotkey.", theme.muted())
+    row += 2
     canvas.put(row, 4, "The only reason this tab exists is solely so I don't get messages asking for this feature.", theme.muted())
 
 
