@@ -1264,7 +1264,7 @@ class DarkAgesApp(ctk.CTk):
                                                  font=ctk.CTkFont(size=15, weight="bold"))
         self.navigation_frame_label.pack()
 
-        self.version_label = ctk.CTkLabel(self.title_container, text="Version 1.3.2",
+        self.version_label = ctk.CTkLabel(self.title_container, text="Version 1.3.1",
                                           font=ctk.CTkFont(size=11), text_color="gray")
         self.version_label.pack(pady=(2, 0))
 

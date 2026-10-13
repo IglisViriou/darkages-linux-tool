@@ -5,15 +5,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ---
 
-## [1.3.2] - 2026-10-13
-
-### Changed
-* **Macro Management Button Polish**: Restyled the `+ New Macro`, `Edit`, and `×` (Delete) buttons in the Macro Management tab using CustomTkinter `CTkButton` components with rounded corners, theme hover colors, and matching container cards to align with the Home tab design.
-* **Credits & Repository Links**: Updated Iglis's profile link to `https://github.com/IglisViriou` across GUI and TUI credits, as well as updating repository remote configuration.
-* **Version Indicator**: Updated sidebar header version indicator to `Version 1.3.2`.
-
----
-
 ## [1.3.1] - 2026-10-13
 
 ### Added
@@ -23,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 * **Split Step Insertion Buttons**: Split "Add Left Click", "Add Right Click", "Add Keys", and "Add Delay" into explicit "Before" and "After" placement buttons relative to the selected step.
 * **Timing Warning**: Added advisory text explaining that mouse clicks require a delay afterwards to prevent input issues.
 * **Button Renaming**: Renamed click position recorder button to "Record Mouse Position in Client".
+
+### Changed
+* **Macro Management Button Polish**: Restyled the `+ New Macro`, `Edit`, and `×` (Delete) buttons in the Macro Management tab using CustomTkinter `CTkButton` components with rounded corners, theme hover colors, and matching container cards to align with the Home tab design.
+* **Version Indicator**: Updated sidebar header version indicator to `Version 1.3.1`.
 
 ### Fixed
 * **Macro Jamming & Missed Left Clicks (e.g. on Rulkallos)**:
