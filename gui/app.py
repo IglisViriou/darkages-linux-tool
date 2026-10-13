@@ -1264,7 +1264,7 @@ class DarkAgesApp(ctk.CTk):
                                                  font=ctk.CTkFont(size=15, weight="bold"))
         self.navigation_frame_label.pack()
 
-        self.version_label = ctk.CTkLabel(self.title_container, text="Version 1.5.1",
+        self.version_label = ctk.CTkLabel(self.title_container, text="Version 1.5.2",
                                           font=ctk.CTkFont(size=11), text_color="gray")
         self.version_label.pack(pady=(2, 0))
 
@@ -1811,7 +1811,12 @@ class DarkAgesApp(ctk.CTk):
         self.macro_title = ctk.CTkLabel(self.macro_top_frame, text="Macro Management", font=ctk.CTkFont(size=24, weight="bold"))
         self.macro_title.pack(side="left")
         
-        self.new_macro_button = ctk.CTkButton(self.macro_top_frame, text="+ New Macro", command=self.open_editor)
+        self.new_macro_button = ctk.CTkButton(
+            self.macro_top_frame,
+            text="+ New Macro",
+            width=100,
+            command=self.open_editor
+        )
         self.new_macro_button.pack(side="right")
 
         self.macro_list_frame = ctk.CTkScrollableFrame(self.macro_frame, label_text="Your Macros")
@@ -1835,31 +1840,44 @@ class DarkAgesApp(ctk.CTk):
             ctk.CTkFrame(header, height=2, fg_color=color).pack(side="left", fill="x", expand=True, padx=10)
 
             for macro in items:
-                item_frame = ctk.CTkFrame(self.macro_list_frame)
-                item_frame.pack(fill="x", pady=2, padx=5)
+                item_frame = ctk.CTkFrame(self.macro_list_frame, fg_color=("gray90", "#2B2B2B"), corner_radius=6)
+                item_frame.pack(fill="x", pady=3, padx=5)
                 
-                name_label = ctk.CTkLabel(item_frame, text=macro["name"], font=ctk.CTkFont(weight="bold"))
-                name_label.pack(side="left", padx=10)
+                name_label = ctk.CTkLabel(item_frame, text=macro["name"], font=ctk.CTkFont(size=13, weight="bold"))
+                name_label.pack(side="left", padx=10, pady=6)
                 
-                trigger_label = ctk.CTkLabel(item_frame, text=macro["trigger"].replace("KEY_", ""), text_color="orange")
-                trigger_label.pack(side="left", padx=10)
+                trigger_label = ctk.CTkLabel(item_frame, text=macro["trigger"].replace("KEY_", ""), text_color="orange", font=ctk.CTkFont(size=12, weight="bold"))
+                trigger_label.pack(side="left", padx=10, pady=6)
                 
-                steps_label = ctk.CTkLabel(item_frame, text=f"{len(macro['steps'])} steps", text_color="gray")
-                steps_label.pack(side="left", padx=10)
+                steps_label = ctk.CTkLabel(item_frame, text=f"{len(macro['steps'])} steps", text_color="gray", font=ctk.CTkFont(size=11))
+                steps_label.pack(side="left", padx=10, pady=6)
                 
-                delete_btn = tk.Button(
-                    item_frame, text="Del", relief="flat", bd=0, bg="#AA4444", fg="white",
-                    activebackground="#882222", activeforeground="white", font=("Arial", 9, "bold"), width=5,
-                    command=lambda m=macro: self.delete_macro(m)
-                )
-                delete_btn.pack(side="right", padx=6, pady=5)
+                btn_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
+                btn_frame.pack(side="right", padx=10, pady=6)
 
-                edit_btn = tk.Button(
-                    item_frame, text="Edit", relief="flat", bd=0, bg="#4444AA", fg="white",
-                    activebackground="#333388", activeforeground="white", font=("Arial", 9, "bold"), width=5,
+                edit_btn = ctk.CTkButton(
+                    btn_frame,
+                    text="Edit",
+                    width=45,
+                    height=28,
+                    fg_color="#4444AA",
+                    hover_color="#333388",
+                    font=ctk.CTkFont(size=11),
                     command=lambda m=macro: self.edit_macro(m)
                 )
-                edit_btn.pack(side="right", padx=6, pady=5)
+                edit_btn.pack(side="left", padx=4)
+
+                delete_btn = ctk.CTkButton(
+                    btn_frame,
+                    text="×",
+                    width=28,
+                    height=28,
+                    fg_color="#AA4444",
+                    hover_color="#882222",
+                    font=ctk.CTkFont(size=14, weight="bold"),
+                    command=lambda m=macro: self.delete_macro(m)
+                )
+                delete_btn.pack(side="left", padx=2)
 
                 enabled_switch = ctk.CTkSwitch(item_frame, text="", width=40, command=lambda m=macro: self.toggle_macro(m))
                 if macro.get("enabled", True):
@@ -1943,7 +1961,7 @@ class DarkAgesApp(ctk.CTk):
 
 GUI Implementation and Troubleshooting: Aon - https://github.com/FreyaNile
 
-Feature implementation, Optimization, and Polishing: Iglis - https://github.com/kryptosfang""",
+Feature implementation, Optimization, and Polishing: Iglis - https://github.com/IglisViriou""",
             font=ctk.CTkFont(size=14),
             wraplength=600,
             justify="center"

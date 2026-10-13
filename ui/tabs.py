@@ -442,7 +442,7 @@ def _draw_credits(canvas: Canvas, top: int) -> None:
     row += 2
     canvas.put(row, 4, """Initial Coding and Setup, Initial Macro and Butterwalk implementation: Phever - https://github.com/phever
 GUI Implementation and Troubleshooting: Aon - https://github.com/FreyaNile
-Feature implementation, Optimization, and Polishing: Iglis - https://github.com/kryptosfang""", theme.muted())
+Feature implementation, Optimization, and Polishing: Iglis - https://github.com/IglisViriou""", theme.muted())
 
 
 # ── main loop ─────────────────────────────────────────────────────────────
