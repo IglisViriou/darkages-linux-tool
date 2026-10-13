@@ -245,18 +245,35 @@ class MacroFeature:
         state["active_macro_tasks"][macro["id"]] = asyncio.current_task()
 
         try:
+            loop = asyncio.get_running_loop()
+            last_key_end_time = 0.0
+
             for step in macro["steps"]:
                 if not state["running"]:
                     break
-                if step["delay_ms"] > 0:
-                    await asyncio.sleep(step["delay_ms"] / 1000)
+
+                # If this is a mouse click following a key (e.g. spell hotkey -> target confirmation),
+                # guarantee a minimum pre-click delay (25ms) so the game client has time to open the targeting reticle.
+                if step["kind"] in ("mouse_left", "mouse_right") and last_key_end_time > 0.0:
+                    elapsed = loop.time() - last_key_end_time
+                    step_delay = (step.get("delay_ms", 0) or 0) / 1000.0
+                    min_transition = 0.025
+                    remaining = min_transition - (elapsed + step_delay)
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
+
+                if step.get("delay_ms", 0) > 0:
+                    await asyncio.sleep(step["delay_ms"] / 1000.0)
                 
                 if step["kind"] == "key" and step["value"]:
                     await injector.key(step["value"])
+                    last_key_end_time = loop.time()
                 elif step["kind"] == "mouse_left":
                     await injector.mouse_click(1, step.get("x"), step.get("y"))
+                    last_key_end_time = 0.0
                 elif step["kind"] == "mouse_right":
                     await injector.mouse_click(3, step.get("x"), step.get("y"))
+                    last_key_end_time = 0.0
                 elif step["kind"] == "wait":
                     pass
         except asyncio.CancelledError:

@@ -80,7 +80,7 @@ async def key(key_name: str, hold_s: float = 0.004, gap_s: float = 0.002) -> Non
     await proc.wait()
 
 
-async def mouse_click(button: int, x: int | None = None, y: int | None = None, hold_s: float = 0.005, gap_s: float = 0.003) -> None:
+async def mouse_click(button: int, x: int | None = None, y: int | None = None, hold_s: float = 0.025, gap_s: float = 0.020) -> None:
     if x is not None and y is not None:
         from state import state
         wid = state.get("active_window_id")
@@ -99,7 +99,10 @@ async def mouse_click(button: int, x: int | None = None, y: int | None = None, h
         args = ["xdotool", "mousemove"]
         if wid:
             args.extend(["--window", wid])
-        args.extend([str(x), str(y), "click", str(button)])
+        args.extend([str(x), str(y), "mousedown", str(button)])
+        if hold_s > 0:
+            args.extend(["sleep", f"{hold_s:.3f}"])
+        args.extend(["mouseup", str(button)])
 
         proc = await asyncio.create_subprocess_exec(
             *args,
@@ -107,6 +110,8 @@ async def mouse_click(button: int, x: int | None = None, y: int | None = None, h
             stderr=asyncio.subprocess.DEVNULL
         )
         await proc.wait()
+        if gap_s > 0:
+            await asyncio.sleep(gap_s)
     else:
         # Try using virtual input (uinput) first for high performance and low latency
         if input_hub._uinput is not None:
@@ -136,12 +141,18 @@ async def mouse_click(button: int, x: int | None = None, y: int | None = None, h
                     pass  # Fallback to xdotool if writing to uinput fails
 
         # Fallback to xdotool
+        args = ["xdotool", "mousedown", str(button)]
+        if hold_s > 0:
+            args.extend(["sleep", f"{hold_s:.3f}"])
+        args.extend(["mouseup", str(button)])
         proc = await asyncio.create_subprocess_exec(
-            "xdotool", "click", str(button),
+            *args,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL
         )
         await proc.wait()
+        if gap_s > 0:
+            await asyncio.sleep(gap_s)
 
 
 async def mouse_move_relative(dx: int, dy: int) -> None:

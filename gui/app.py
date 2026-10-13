@@ -24,17 +24,83 @@ import asyncio
 import uuid
 import subprocess
 
+# Optimize CustomTkinter on Linux: CTkScrollbar._draw calls update_idletasks() synchronously,
+# which causes massive UI freezing on Linux when multiple widgets or unmapped frames exist.
+_orig_scrollbar_draw = ctk.CTkScrollbar._draw
+
+def _fast_scrollbar_draw(self, no_color_updates=False):
+    super(ctk.CTkScrollbar, self)._draw(no_color_updates)
+    corrected_start_value, corrected_end_value = self._get_scrollbar_values_for_minimum_pixel_size()
+    requires_recoloring = self._draw_engine.draw_rounded_scrollbar(
+        self._apply_widget_scaling(self._current_width),
+        self._apply_widget_scaling(self._current_height),
+        self._apply_widget_scaling(self._corner_radius),
+        self._apply_widget_scaling(self._border_spacing),
+        corrected_start_value,
+        corrected_end_value,
+        self._orientation
+    )
+    if no_color_updates is False or requires_recoloring:
+        if self._hover_state is True:
+            self._canvas.itemconfig(
+                "scrollbar_parts",
+                fill=self._apply_appearance_mode(self._button_hover_color),
+                outline=self._apply_appearance_mode(self._button_hover_color)
+            )
+        else:
+            self._canvas.itemconfig(
+                "scrollbar_parts",
+                fill=self._apply_appearance_mode(self._button_color),
+                outline=self._apply_appearance_mode(self._button_color)
+            )
+        if self._fg_color == "transparent":
+            self._canvas.configure(bg=self._apply_appearance_mode(self._bg_color))
+            self._canvas.itemconfig(
+                "border_parts",
+                fill=self._apply_appearance_mode(self._bg_color),
+                outline=self._apply_appearance_mode(self._bg_color)
+            )
+        else:
+            self._canvas.configure(bg=self._apply_appearance_mode(self._fg_color))
+            self._canvas.itemconfig(
+                "border_parts",
+                fill=self._apply_appearance_mode(self._fg_color),
+                outline=self._apply_appearance_mode(self._fg_color)
+            )
+    # Intentionally omitted self._canvas.update_idletasks() for zero-lag rendering on Linux
+
+ctk.CTkScrollbar._draw = _fast_scrollbar_draw
+
+_LINUX_SCROLL_FRAMES: list[ctk.CTkScrollableFrame] = []
+_LINUX_SCROLL_INITIALIZED = False
+
+def _on_linux_mousewheel(event):
+    for sf in list(_LINUX_SCROLL_FRAMES):
+        try:
+            if not sf.winfo_exists():
+                _LINUX_SCROLL_FRAMES.remove(sf)
+                continue
+            if sf.check_if_master_is_canvas(event.widget):
+                if event.num == 4:
+                    sf._parent_canvas.yview("scroll", -1, "units")
+                elif event.num == 5:
+                    sf._parent_canvas.yview("scroll", 1, "units")
+                break
+        except Exception:
+            pass
+
 def enable_linux_scroll(scrollable_frame: ctk.CTkScrollableFrame):
-    """Explicitly bind mouse wheel buttons for Linux compatibility."""
-    def on_scroll(event):
-        if scrollable_frame.check_if_master_is_canvas(event.widget):
-            if event.num == 4:
-                scrollable_frame._parent_canvas.yview("scroll", -1, "units")
-            elif event.num == 5:
-                scrollable_frame._parent_canvas.yview("scroll", 1, "units")
-    
-    scrollable_frame.bind_all("<Button-4>", on_scroll, add="+")
-    scrollable_frame.bind_all("<Button-5>", on_scroll, add="+")
+    """Explicitly bind mouse wheel buttons for Linux compatibility with central handler."""
+    global _LINUX_SCROLL_INITIALIZED
+    if scrollable_frame not in _LINUX_SCROLL_FRAMES:
+        _LINUX_SCROLL_FRAMES.append(scrollable_frame)
+    if not _LINUX_SCROLL_INITIALIZED:
+        try:
+            scrollable_frame.bind_all("<Button-4>", _on_linux_mousewheel, add="+")
+            scrollable_frame.bind_all("<Button-5>", _on_linux_mousewheel, add="+")
+            _LINUX_SCROLL_INITIALIZED = True
+        except Exception:
+            pass
 
 class MacroEditor(ctk.CTkToplevel):
     def __init__(self, parent, on_save, macro_to_edit=None):
@@ -57,6 +123,9 @@ class MacroEditor(ctk.CTkToplevel):
         self.trigger_mode = macro_to_edit.get("trigger_mode", "once") if macro_to_edit else "once"
         self.output_key = self.current_steps[0]["value"] if self.kind == "keybind" and self.current_steps else None
         self.listening_for = None # "trigger" or "output"
+        self.row_frames = []
+        self._drag_data = {"src": None, "active": False, "start_y": 0, "target": None}
+        self.selected_step_index = None
         
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -150,49 +219,89 @@ class MacroEditor(ctk.CTkToplevel):
         
         ctk.CTkLabel(self.macro_section, text="Step Builder", font=ctk.CTkFont(size=16, weight="bold")).pack(pady=10)
 
-        # Quick Add Buttons
-        quick_frame = ctk.CTkFrame(self.macro_section, fg_color="transparent")
-        quick_frame.pack(fill="x", padx=20, pady=5)
+        # Quick Add Buttons: Left Click & Right Click (Split into Before and After)
+        click_frame_1 = ctk.CTkFrame(self.macro_section, fg_color="transparent")
+        click_frame_1.pack(fill="x", padx=20, pady=(5, 3))
         
-        ctk.CTkButton(quick_frame, text="Add Left Click", width=100, command=lambda: self.add_raw_step("mouse_left")).pack(side="left", padx=5)
-        ctk.CTkButton(quick_frame, text="Add Right Click", width=100, command=lambda: self.add_raw_step("mouse_right")).pack(side="left", padx=5)
-        
-        self.record_btn = ctk.CTkButton(quick_frame, text="Record Window Click", fg_color="orange", text_color="black", hover_color="#CC8800",
-                                       command=self.start_countdown)
-        self.record_btn.pack(side="left", padx=5)
+        self.add_left_before_btn = ctk.CTkButton(click_frame_1, text="Add Left Click (Before)", width=150, height=36,
+                                                 command=lambda: self.add_raw_step("mouse_left", "before"))
+        self.add_left_before_btn.pack(side="left", padx=(0, 6))
 
-        # Input + Add Button
+        self.add_left_after_btn = ctk.CTkButton(click_frame_1, text="Add Left Click (After)", width=150, height=36,
+                                                command=lambda: self.add_raw_step("mouse_left", "after"))
+        self.add_left_after_btn.pack(side="left", padx=(0, 6))
+
+        self.record_btn = ctk.CTkButton(click_frame_1, text="Record Mouse\nPosition in Client", fg_color="orange", text_color="black", 
+                                        hover_color="#CC8800", width=150, height=36, command=self.start_countdown)
+        self.record_btn.pack(side="left")
+
+        click_frame_2 = ctk.CTkFrame(self.macro_section, fg_color="transparent")
+        click_frame_2.pack(fill="x", padx=20, pady=(3, 3))
+
+        self.add_right_before_btn = ctk.CTkButton(click_frame_2, text="Add Right Click (Before)", width=150, height=36,
+                                                  command=lambda: self.add_raw_step("mouse_right", "before"))
+        self.add_right_before_btn.pack(side="left", padx=(0, 6))
+
+        self.add_right_after_btn = ctk.CTkButton(click_frame_2, text="Add Right Click (After)", width=150, height=36,
+                                                 command=lambda: self.add_raw_step("mouse_right", "after"))
+        self.add_right_after_btn.pack(side="left")
+
+        # Mouse Click Delay Warning
+        self.click_delay_warning = ctk.CTkLabel(
+            self.macro_section,
+            text="⚠️ Warning: Mouse clicks require a minimum of 10ms delay afterwards to not cause issues.",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#FFAA33"
+        )
+        self.click_delay_warning.pack(anchor="w", padx=20, pady=(2, 6))
+
+        # Input + Add Keys Buttons (Before & After)
         input_frame = ctk.CTkFrame(self.macro_section, fg_color="transparent")
-        input_frame.pack(fill="x", padx=20, pady=15)
+        input_frame.pack(fill="x", padx=20, pady=12)
         
-        self.step_input = ctk.CTkEntry(input_frame, placeholder_text="Type keys (e.g. {enter}, f, {F1})...", width=350)
-        self.step_input.pack(side="left", fill="x", expand=True)
-        self.step_input.bind("<Return>", lambda e: self.add_segment())
+        self.step_input = ctk.CTkEntry(input_frame, placeholder_text="Type keys (e.g. {enter}, f, {F1})...")
+        self.step_input.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.step_input.bind("<Return>", lambda e: self.add_segment("after"))
 
-        self.add_button = ctk.CTkButton(input_frame, text="Add Keys", width=80, command=self.add_segment)
-        self.add_button.pack(side="left", padx=(10, 0))
+        self.add_keys_before_btn = ctk.CTkButton(input_frame, text="Add Keys (Before)", width=130, 
+                                                 command=lambda: self.add_segment("before"))
+        self.add_keys_before_btn.pack(side="left", padx=(0, 6))
+
+        self.add_keys_after_btn = ctk.CTkButton(input_frame, text="Add Keys (After)", width=130, 
+                                                command=lambda: self.add_segment("after"))
+        self.add_keys_after_btn.pack(side="left")
 
         # Syntax Hint
         ctk.CTkLabel(self.macro_section, text="Syntax: {F1}, {enter}, {space}, {click}, {rclick}, {wait:100}", 
-                    font=ctk.CTkFont(size=10), text_color="gray").pack(pady=(0, 10))
+                    font=ctk.CTkFont(size=10), text_color="gray").pack(pady=(0, 8))
 
         # Capture Status Label
         self.capture_status = ctk.CTkLabel(self.macro_section, text="Status: Ready", font=ctk.CTkFont(size=11), text_color="gray")
         self.capture_status.pack(pady=(0, 5))
 
-        # Manual Delay Setting
+        # Manual Delay Setting (Before & After)
         delay_frame = ctk.CTkFrame(self.macro_section, fg_color="transparent")
         delay_frame.pack(fill="x", padx=20, pady=5)
-        ctk.CTkLabel(delay_frame, text="Delay (ms):").pack(side="left")
-        self.delay_input = ctk.CTkEntry(delay_frame, width=100, placeholder_text="100")
-        self.delay_input.pack(side="left", padx=10)
-        self.add_delay_btn = ctk.CTkButton(delay_frame, text="Add Delay Step", width=120, command=self.add_delay_step)
-        self.add_delay_btn.pack(side="left")
+        ctk.CTkLabel(delay_frame, text="Delay (ms):").pack(side="left", padx=(0, 6))
+        self.delay_input = ctk.CTkEntry(delay_frame, width=90, placeholder_text="100")
+        self.delay_input.pack(side="left", padx=(0, 8))
+        self.add_delay_before_btn = ctk.CTkButton(delay_frame, text="Add Delay (Before)", width=130, 
+                                                  command=lambda: self.add_delay_step("before"))
+        self.add_delay_before_btn.pack(side="left", padx=(0, 6))
+        self.add_delay_after_btn = ctk.CTkButton(delay_frame, text="Add Delay (After)", width=130, 
+                                                 command=lambda: self.add_delay_step("after"))
+        self.add_delay_after_btn.pack(side="left")
+
+        # Selection & Editing Panel Bar
+        self.selection_bar = ctk.CTkFrame(self.macro_section, fg_color=("#e6edf3", "#1c2430"), corner_radius=6)
+        self.selection_bar.pack(fill="x", padx=20, pady=(6, 2))
         
         # Steps Display Area
-        self.steps_display = ctk.CTkScrollableFrame(self.macro_section, label_text="Macro Stack", height=250)
+        self.steps_display = ctk.CTkScrollableFrame(self.macro_section, label_text="Macro Stack (Click to select | Drag ⠿ or use ▲▼ to reorder)", height=250)
         self.steps_display.pack(fill="both", expand=True, padx=20, pady=10)
         enable_linux_scroll(self.steps_display)
+        
+        self.drop_indicator = ctk.CTkFrame(self.steps_display, height=4, fg_color="#3b8ed0", corner_radius=2)
         
         self.refresh_steps_display()
 
@@ -254,15 +363,17 @@ class MacroEditor(ctk.CTkToplevel):
         if state.get("captured_click"):
             data = state["captured_click"]
             state["captured_click"] = None
-            self.current_steps.append({
+            idx = self._get_insert_index("after")
+            self.current_steps.insert(idx, {
                 "kind": data["kind"], "value": "", "delay_ms": 0, "x": data["x"], "y": data["y"]
             })
+            self.selected_step_index = idx
             self.capture_status.configure(text=f"Status: Captured click at {data['x']},{data['y']}", text_color="#44AA44")
             self.refresh_steps_display()
 
         # Reset record button if needed
         if not state.get("recording_mouse") and self.record_btn.cget("state") == "disabled":
-            self.record_btn.configure(text="Record Window Click", state="normal")
+            self.record_btn.configure(text="Record Mouse\nPosition in Client", state="normal")
         
         if self.winfo_exists():
             self.after(100, self.poll_state)
@@ -284,71 +395,569 @@ class MacroEditor(ctk.CTkToplevel):
             w_data = dict(line.split("=", 1) for line in w_out.strip().split("\n") if "=" in line)
             wx, wy = int(w_data.get("X", 0)), int(w_data.get("Y", 0))
 
-            self.current_steps.append({
+            idx = self._get_insert_index("after")
+            self.current_steps.insert(idx, {
                 "kind": "mouse_left", "value": "", 
                 "delay_ms": 0,
                 "x": mx - wx, "y": my - wy
             })
+            self.selected_step_index = idx
             self.capture_status.configure(text=f"Status: Captured click at {mx-wx},{my-wy}", text_color="#44AA44")
         except Exception as e:
             self.capture_status.configure(text=f"Status: Capture failed: {str(e)}", text_color="red")
-        self.record_btn.configure(text="Record Window Click", state="normal")
+        self.record_btn.configure(text="Record Mouse\nPosition in Client", state="normal")
         self.refresh_steps_display()
 
-    def add_raw_step(self, kind):
-        self.current_steps.append({"kind": kind, "value": "", "delay_ms": 0})
+    def _get_insert_index(self, position="after"):
+        if not self.current_steps:
+            return 0
+        if self.selected_step_index is not None and 0 <= self.selected_step_index < len(self.current_steps):
+            if position == "before":
+                return self.selected_step_index
+            else:
+                return self.selected_step_index + 1
+        else:
+            if position == "before":
+                return 0
+            else:
+                return len(self.current_steps)
+
+    def parse_single_key(self, raw: str) -> str:
+        raw = raw.strip()
+        if not raw:
+            return ""
+        if raw.startswith("{") and raw.endswith("}") and len(raw) >= 2:
+            inner = raw[1:-1].strip()
+        else:
+            inner = raw
+
+        lower_inner = inner.lower()
+        from features.macro import _SPECIAL_XDOTOOL
+        if lower_inner in _SPECIAL_XDOTOOL:
+            return _SPECIAL_XDOTOOL[lower_inner]
+        if lower_inner == "-":
+            return "minus"
+        if lower_inner == "=":
+            return "equal"
+
+        steps = _parse_sequence(f"{{{lower_inner}}}")
+        if steps and steps[0]["kind"] == "key" and steps[0]["value"]:
+            return steps[0]["value"]
+
+        steps = _parse_sequence(inner)
+        if steps and steps[0]["kind"] == "key" and steps[0]["value"]:
+            return steps[0]["value"]
+
+        return inner
+
+    def select_step(self, index, focus_edit=False):
+        old_idx = self.selected_step_index
+        if old_idx == index and not focus_edit:
+            self.selected_step_index = None
+        else:
+            self.selected_step_index = index
+
+        # If row widgets are already rendered and match count, perform instant in-place style update
+        if len(self.row_frames) == len(self.current_steps):
+            if old_idx is not None and 0 <= old_idx < len(self.row_frames):
+                try:
+                    self.row_frames[old_idx].configure(fg_color=("gray86", "gray17"), border_width=0)
+                except Exception:
+                    pass
+            new_idx = self.selected_step_index
+            if new_idx is not None and 0 <= new_idx < len(self.row_frames):
+                try:
+                    self.row_frames[new_idx].configure(fg_color=("#324a66", "#1c324b"), border_width=2, border_color="#3b8ed0")
+                except Exception:
+                    pass
+            self.update_selection_panel(focus_edit=focus_edit)
+        else:
+            self.refresh_steps_display(focus_edit=focus_edit)
+
+    def clear_selection(self):
+        old_idx = self.selected_step_index
+        self.selected_step_index = None
+        if len(self.row_frames) == len(self.current_steps):
+            if old_idx is not None and 0 <= old_idx < len(self.row_frames):
+                try:
+                    self.row_frames[old_idx].configure(fg_color=("gray86", "gray17"), border_width=0)
+                except Exception:
+                    pass
+            self.update_selection_panel(focus_edit=False)
+        else:
+            self.refresh_steps_display(focus_edit=False)
+
+    def _focus_entry(self, widget):
+        try:
+            widget.focus_set()
+            if hasattr(widget, "select_range"):
+                widget.select_range(0, "end")
+        except Exception:
+            pass
+
+    def update_selection_panel(self, focus_edit=False):
+        for widget in self.selection_bar.winfo_children():
+            widget.destroy()
+
+        if self.selected_step_index is None or not (0 <= self.selected_step_index < len(self.current_steps)):
+            lbl = ctk.CTkLabel(
+                self.selection_bar,
+                text="Selected Input: None (Click any step below or ✎ to select & edit)",
+                text_color="gray",
+                font=ctk.CTkFont(size=12)
+            )
+            lbl.pack(pady=8, padx=10)
+            return
+
+        idx = self.selected_step_index
+        step = self.current_steps[idx]
+        kind = step.get("kind", "key")
+
+        # Top header row
+        header_frame = ctk.CTkFrame(self.selection_bar, fg_color="transparent")
+        header_frame.pack(fill="x", padx=10, pady=(6, 2))
+
+        kind_display = {
+            "key": "Keystroke",
+            "wait": "Delay / Wait",
+            "mouse_left": "Mouse Left Click",
+            "mouse_right": "Mouse Right Click"
+        }.get(kind, kind.upper())
+
+        title_lbl = ctk.CTkLabel(
+            header_frame,
+            text=f"Edit Step #{idx + 1}: {kind_display}",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#58a6ff"
+        )
+        title_lbl.pack(side="left")
+
+        deselect_btn = ctk.CTkButton(
+            header_frame,
+            text="Deselect",
+            width=65,
+            height=22,
+            fg_color="gray30",
+            hover_color="gray40",
+            font=ctk.CTkFont(size=11),
+            command=self.clear_selection
+        )
+        deselect_btn.pack(side="right")
+
+        # Edit controls row
+        ctrl_frame = ctk.CTkFrame(self.selection_bar, fg_color="transparent")
+        ctrl_frame.pack(fill="x", padx=10, pady=(2, 6))
+
+        focus_target = None
+
+        if kind == "key":
+            ctk.CTkLabel(ctrl_frame, text="Key:", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left", padx=(0, 4))
+            self.edit_key_entry = ctk.CTkEntry(ctrl_frame, width=120, placeholder_text="e.g. F1, space, a")
+            self.edit_key_entry.insert(0, str(step.get("value", "")))
+            self.edit_key_entry.pack(side="left", padx=(0, 10))
+            self.edit_key_entry.bind("<Return>", lambda e: self.apply_step_edit())
+            focus_target = self.edit_key_entry
+
+            ctk.CTkLabel(ctrl_frame, text="Delay (ms):", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 4))
+            self.edit_delay_entry = ctk.CTkEntry(ctrl_frame, width=70, placeholder_text="0")
+            self.edit_delay_entry.insert(0, str(step.get("delay_ms", 0)))
+            self.edit_delay_entry.pack(side="left", padx=(0, 10))
+            self.edit_delay_entry.bind("<Return>", lambda e: self.apply_step_edit())
+
+        elif kind == "wait":
+            ctk.CTkLabel(ctrl_frame, text="Delay (ms):", font=ctk.CTkFont(size=12, weight="bold")).pack(side="left", padx=(0, 4))
+            self.edit_delay_entry = ctk.CTkEntry(ctrl_frame, width=90, placeholder_text="100")
+            self.edit_delay_entry.insert(0, str(step.get("delay_ms", 0)))
+            self.edit_delay_entry.pack(side="left", padx=(0, 10))
+            self.edit_delay_entry.bind("<Return>", lambda e: self.apply_step_edit())
+            focus_target = self.edit_delay_entry
+
+        elif kind in ("mouse_left", "mouse_right"):
+            ctk.CTkLabel(ctrl_frame, text="Type:", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 4))
+            self.edit_click_type = ctk.CTkSegmentedButton(
+                ctrl_frame,
+                values=["Left Click", "Right Click"],
+                width=140
+            )
+            self.edit_click_type.set("Left Click" if kind == "mouse_left" else "Right Click")
+            self.edit_click_type.pack(side="left", padx=(0, 10))
+
+            ctk.CTkLabel(ctrl_frame, text="X:", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 2))
+            self.edit_x_entry = ctk.CTkEntry(ctrl_frame, width=55)
+            if step.get("x") is not None:
+                self.edit_x_entry.insert(0, str(step["x"]))
+            self.edit_x_entry.pack(side="left", padx=(0, 6))
+            self.edit_x_entry.bind("<Return>", lambda e: self.apply_step_edit())
+            focus_target = self.edit_x_entry
+
+            ctk.CTkLabel(ctrl_frame, text="Y:", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 2))
+            self.edit_y_entry = ctk.CTkEntry(ctrl_frame, width=55)
+            if step.get("y") is not None:
+                self.edit_y_entry.insert(0, str(step["y"]))
+            self.edit_y_entry.pack(side="left", padx=(0, 8))
+            self.edit_y_entry.bind("<Return>", lambda e: self.apply_step_edit())
+
+            ctk.CTkLabel(ctrl_frame, text="Delay (ms):", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 2))
+            self.edit_delay_entry = ctk.CTkEntry(ctrl_frame, width=55)
+            self.edit_delay_entry.insert(0, str(step.get("delay_ms", 0)))
+            self.edit_delay_entry.pack(side="left", padx=(0, 10))
+            self.edit_delay_entry.bind("<Return>", lambda e: self.apply_step_edit())
+
+        self._apply_btn = ctk.CTkButton(
+            ctrl_frame,
+            text="Apply Change",
+            width=100,
+            height=28,
+            fg_color="#238636",
+            hover_color="#2ea043",
+            font=ctk.CTkFont(weight="bold"),
+            command=self.apply_step_edit
+        )
+        self._apply_btn.pack(side="left", padx=(4, 0))
+
+        if focus_edit and focus_target:
+            self.after(50, lambda: self._focus_entry(focus_target))
+
+    def apply_step_edit(self):
+        if self.selected_step_index is None or not (0 <= self.selected_step_index < len(self.current_steps)):
+            return
+
+        idx = self.selected_step_index
+        step = self.current_steps[idx]
+        kind = step.get("kind", "key")
+
+        if kind == "key":
+            raw_key = self.edit_key_entry.get().strip()
+            if not raw_key:
+                self.edit_key_entry.configure(border_color="red")
+                return
+
+            if raw_key.startswith("{") and raw_key.endswith("}"):
+                seq = _parse_sequence(raw_key)
+                if len(seq) == 1 and seq[0]["kind"] != "key":
+                    step["kind"] = seq[0]["kind"]
+                    step["value"] = seq[0]["value"]
+                    step["delay_ms"] = seq[0]["delay_ms"]
+                    if seq[0].get("x") is not None:
+                        step["x"] = seq[0]["x"]
+                        step["y"] = seq[0]["y"]
+                    self.refresh_steps_display(focus_edit=False)
+                    self._flash_apply_btn()
+                    return
+
+            parsed_key = self.parse_single_key(raw_key)
+            if not parsed_key:
+                self.edit_key_entry.configure(border_color="red")
+                return
+            self.edit_key_entry.configure(border_color="gray")
+
+            delay_str = self.edit_delay_entry.get().strip()
+            delay_ms = 0
+            if delay_str:
+                try:
+                    delay_ms = max(0, int(delay_str))
+                    self.edit_delay_entry.configure(border_color="gray")
+                except ValueError:
+                    self.edit_delay_entry.configure(border_color="red")
+                    return
+
+            step["value"] = parsed_key
+            step["delay_ms"] = delay_ms
+
+        elif kind == "wait":
+            delay_str = self.edit_delay_entry.get().strip()
+            try:
+                delay_ms = max(0, int(delay_str))
+                self.edit_delay_entry.configure(border_color="gray")
+            except (ValueError, TypeError):
+                self.edit_delay_entry.configure(border_color="red")
+                return
+            step["delay_ms"] = delay_ms
+
+        elif kind in ("mouse_left", "mouse_right"):
+            click_choice = self.edit_click_type.get()
+            step["kind"] = "mouse_left" if click_choice == "Left Click" else "mouse_right"
+
+            x_str = self.edit_x_entry.get().strip()
+            y_str = self.edit_y_entry.get().strip()
+            if x_str:
+                try:
+                    step["x"] = int(x_str)
+                    self.edit_x_entry.configure(border_color="gray")
+                except ValueError:
+                    self.edit_x_entry.configure(border_color="red")
+                    return
+            else:
+                step["x"] = None
+
+            if y_str:
+                try:
+                    step["y"] = int(y_str)
+                    self.edit_y_entry.configure(border_color="gray")
+                except ValueError:
+                    self.edit_y_entry.configure(border_color="red")
+                    return
+            else:
+                step["y"] = None
+
+            delay_str = self.edit_delay_entry.get().strip()
+            delay_ms = 0
+            if delay_str:
+                try:
+                    delay_ms = max(0, int(delay_str))
+                    self.edit_delay_entry.configure(border_color="gray")
+                except ValueError:
+                    self.edit_delay_entry.configure(border_color="red")
+                    return
+            step["delay_ms"] = delay_ms
+
+        self.refresh_steps_display(focus_edit=False)
+        self._flash_apply_btn()
+
+    def _flash_apply_btn(self):
+        if hasattr(self, "_apply_btn") and self._apply_btn and self._apply_btn.winfo_exists():
+            self._apply_btn.configure(text="✓ Applied", fg_color="#1f6feb")
+            self.after(1000, lambda: self._apply_btn.configure(text="Apply Change", fg_color="#238636") if hasattr(self, "_apply_btn") and self._apply_btn and self._apply_btn.winfo_exists() else None)
+
+    def add_raw_step(self, kind, position="after"):
+        idx = self._get_insert_index(position)
+        self.current_steps.insert(idx, {"kind": kind, "value": "", "delay_ms": 0})
+        self.selected_step_index = idx
         self.refresh_steps_display()
 
-    def add_segment(self):
+    def add_segment(self, position="after"):
         seg = self.step_input.get().strip()
         if not seg: return
         new_steps = _parse_sequence(seg)
-        self.current_steps.extend(new_steps)
+        if not new_steps: return
+        idx = self._get_insert_index(position)
+        for offset, step in enumerate(new_steps):
+            self.current_steps.insert(idx + offset, step)
+        self.selected_step_index = idx + len(new_steps) - 1
         self.step_input.delete(0, 'end')
         self.refresh_steps_display()
 
-    def add_delay_step(self):
+    def add_delay_step(self, position="after"):
         val = self.delay_input.get().strip()
         if not val.isdigit():
             self.delay_input.configure(border_color="red")
             return
         self.delay_input.configure(border_color="gray")
         ms = int(val)
-        self.current_steps.append({"kind": "wait", "value": "", "delay_ms": ms})
+        idx = self._get_insert_index(position)
+        self.current_steps.insert(idx, {"kind": "wait", "value": "", "delay_ms": ms})
+        self.selected_step_index = idx
         self.refresh_steps_display()
 
-    def refresh_steps_display(self):
-        for widget in self.steps_display.winfo_children(): widget.destroy()
+    def refresh_steps_display(self, focus_edit=False):
+        for widget in self.steps_display.winfo_children():
+            if widget != self.drop_indicator:
+                widget.destroy()
+        self.drop_indicator.pack_forget()
+        self.row_frames.clear()
+
+        # Keep selected_step_index in valid bounds
+        if self.selected_step_index is not None and not (0 <= self.selected_step_index < len(self.current_steps)):
+            self.selected_step_index = None
+
+        # Update Selection & Editing Bar
+        self.update_selection_panel(focus_edit=focus_edit)
+
         if not self.current_steps:
             ctk.CTkLabel(self.steps_display, text="Stack is empty.", text_color="gray").pack(pady=20)
             return
+
         for i, step in enumerate(self.current_steps):
-            f = ctk.CTkFrame(self.steps_display)
+            is_selected = (self.selected_step_index == i)
+            f = ctk.CTkFrame(
+                self.steps_display,
+                fg_color=("#324a66", "#1c324b") if is_selected else ("gray86", "gray17"),
+                border_width=2 if is_selected else 0,
+                border_color="#3b8ed0" if is_selected else None
+            )
             f.pack(fill="x", pady=2)
-            
+            self.row_frames.append(f)
+
+            # Drag handle
+            handle = ctk.CTkLabel(f, text="⠿", font=ctk.CTkFont(size=14, weight="bold"), text_color="gray60", cursor="fleur", width=16)
+            handle.pack(side="left", padx=(8, 2))
+
             if step["kind"] == "wait":
                 label = f"WAIT {step['delay_ms']}ms"
                 color = "orange"
             else:
                 label = step["value"] if step["kind"] == "key" else f"[{step['kind']}]"
                 color = "white"
-                
-            ctk.CTkLabel(f, text=f"{i+1}. {label}", font=ctk.CTkFont(family="monospace"), text_color=color).pack(side="left", padx=10)
-            
+
+            step_lbl = ctk.CTkLabel(f, text=f"{i+1}. {label}", font=ctk.CTkFont(family="monospace"), text_color=color)
+            step_lbl.pack(side="left", padx=6)
+
+            bind_targets = [handle, f, step_lbl]
+
+            if is_selected:
+                badge = ctk.CTkLabel(f, text="[SELECTED]", font=ctk.CTkFont(size=9, weight="bold"), text_color="#58a6ff")
+                badge.pack(side="left", padx=4)
+                bind_targets.append(badge)
+
             if step.get("x") is not None:
-                ctk.CTkLabel(f, text=f"@{step['x']},{step['y']}", text_color="cyan", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=5)
-            
+                coord_lbl = ctk.CTkLabel(f, text=f"@{step['x']},{step['y']}", text_color="cyan", font=ctk.CTkFont(weight="bold"))
+                coord_lbl.pack(side="left", padx=5)
+                bind_targets.append(coord_lbl)
+
             if step["kind"] != "wait" and step.get("delay_ms", 0) > 0:
-                ctk.CTkLabel(f, text=f"{step['delay_ms']}ms", text_color="gray", font=ctk.CTkFont(size=10)).pack(side="left", padx=5)
-            
-            remove_btn = ctk.CTkButton(f, text="×", width=20, height=20, fg_color="transparent", text_color="red", hover_color="#331111", 
-                                       command=lambda idx=i: self.remove_step(idx))
-            remove_btn.pack(side="right", padx=5)
+                delay_lbl = ctk.CTkLabel(f, text=f"{step['delay_ms']}ms", text_color="gray", font=ctk.CTkFont(size=10))
+                delay_lbl.pack(side="left", padx=5)
+                bind_targets.append(delay_lbl)
+
+            # Fast action buttons on right: [✎] [▲] [▼] [×]
+            btn_bg = "#1c324b" if is_selected else "#222b35"
+            remove_btn = tk.Button(
+                f, text="×", relief="flat", bd=0, bg=btn_bg, fg="#ff5555",
+                activebackground="#441111", activeforeground="#ff8888", font=("Arial", 10, "bold"), width=2,
+                command=lambda idx=i: self.remove_step(idx)
+            )
+            remove_btn.pack(side="right", padx=(2, 6), pady=2)
+
+            down_btn = tk.Button(
+                f, text="▼", relief="flat", bd=0, bg=btn_bg,
+                fg="#cccccc" if i < len(self.current_steps) - 1 else "#555555",
+                state="normal" if i < len(self.current_steps) - 1 else "disabled",
+                activebackground="#2b4c7e", activeforeground="#ffffff", font=("Arial", 9), width=2,
+                command=lambda idx=i: self.move_step(idx, 1)
+            )
+            down_btn.pack(side="right", padx=2, pady=2)
+
+            up_btn = tk.Button(
+                f, text="▲", relief="flat", bd=0, bg=btn_bg,
+                fg="#cccccc" if i > 0 else "#555555",
+                state="normal" if i > 0 else "disabled",
+                activebackground="#2b4c7e", activeforeground="#ffffff", font=("Arial", 9), width=2,
+                command=lambda idx=i: self.move_step(idx, -1)
+            )
+            up_btn.pack(side="right", padx=2, pady=2)
+
+            edit_btn = tk.Button(
+                f, text="✎", relief="flat", bd=0, bg=btn_bg, fg="#58a6ff",
+                activebackground="#2b4c7e", activeforeground="#ffffff", font=("Arial", 9), width=2,
+                command=lambda idx=i: self.select_step(idx, focus_edit=True)
+            )
+            edit_btn.pack(side="right", padx=2, pady=2)
+
+            # Bind click-to-select, double-click to edit, and drag-to-reorder
+            for w in bind_targets:
+                w.bind("<Button-1>", lambda e, idx=i: self.on_drag_start(e, idx))
+                w.bind("<B1-Motion>", self.on_drag_motion)
+                w.bind("<ButtonRelease-1>", lambda e, idx=i: self.on_drag_release(e, idx))
+                w.bind("<Double-Button-1>", lambda e, idx=i: self.select_step(idx, focus_edit=True))
+
+    def move_step(self, index, direction):
+        target = index + direction
+        if 0 <= target < len(self.current_steps):
+            self.current_steps[index], self.current_steps[target] = self.current_steps[target], self.current_steps[index]
+            if self.selected_step_index == index:
+                self.selected_step_index = target
+            elif self.selected_step_index == target:
+                self.selected_step_index = index
+            self.refresh_steps_display()
 
     def remove_step(self, index):
         if 0 <= index < len(self.current_steps):
             del self.current_steps[index]
+            if self.selected_step_index == index:
+                self.selected_step_index = None
+            elif self.selected_step_index is not None and index < self.selected_step_index:
+                self.selected_step_index -= 1
             self.refresh_steps_display()
+
+    def on_drag_start(self, event, index):
+        self._drag_data = {
+            "src": index,
+            "active": False,
+            "start_y": event.y_root,
+            "target": index
+        }
+
+    def on_drag_motion(self, event):
+        if self._drag_data.get("src") is None:
+            return
+
+        if not self._drag_data["active"]:
+            if abs(event.y_root - self._drag_data["start_y"]) > 4:
+                self._drag_data["active"] = True
+                try:
+                    self.configure(cursor="fleur")
+                except Exception:
+                    pass
+                src = self._drag_data["src"]
+                if 0 <= src < len(self.row_frames):
+                    self.row_frames[src].configure(border_width=2, border_color="#3b8ed0")
+            else:
+                return
+
+        # Auto-scroll if dragging near the top or bottom of the scrollable frame
+        try:
+            canvas = getattr(self.steps_display, "_parent_canvas", None)
+            if canvas and canvas.winfo_exists():
+                c_top = canvas.winfo_rooty()
+                c_bot = c_top + canvas.winfo_height()
+                if event.y_root < c_top + 25:
+                    canvas.yview_scroll(-1, "units")
+                elif event.y_root > c_bot - 25:
+                    canvas.yview_scroll(1, "units")
+        except Exception:
+            pass
+
+        # Calculate target drop position based on row midpoints
+        target_idx = len(self.row_frames)
+        for j, fr in enumerate(self.row_frames):
+            try:
+                mid_y = fr.winfo_rooty() + fr.winfo_height() / 2
+                if event.y_root < mid_y:
+                    target_idx = j
+                    break
+            except Exception:
+                pass
+
+        if target_idx != self._drag_data.get("target"):
+            self._drag_data["target"] = target_idx
+            if target_idx < len(self.row_frames):
+                self.drop_indicator.pack_configure(before=self.row_frames[target_idx], fill="x", padx=10, pady=1)
+            elif self.row_frames:
+                self.drop_indicator.pack_configure(after=self.row_frames[-1], fill="x", padx=10, pady=1)
+
+    def on_drag_release(self, event, index=None):
+        try:
+            self.configure(cursor="")
+        except Exception:
+            pass
+
+        if self._drag_data.get("active") and self._drag_data.get("src") is not None:
+            src = self._drag_data["src"]
+            target = self._drag_data.get("target")
+            if target is not None and 0 <= src < len(self.current_steps):
+                item = self.current_steps.pop(src)
+                new_idx = target if target <= src else target - 1
+                self.current_steps.insert(new_idx, item)
+                if self.selected_step_index == src:
+                    self.selected_step_index = new_idx
+                elif self.selected_step_index is not None:
+                    if src < self.selected_step_index <= new_idx:
+                        self.selected_step_index -= 1
+                    elif new_idx <= self.selected_step_index < src:
+                        self.selected_step_index += 1
+            self._drag_data = {"src": None, "active": False, "start_y": 0, "target": None}
+            self.drop_indicator.pack_forget()
+            self.refresh_steps_display()
+        else:
+            self._drag_data = {"src": None, "active": False, "start_y": 0, "target": None}
+            self.drop_indicator.pack_forget()
+            if index is not None:
+                if self.selected_step_index == index:
+                    self.select_step(index, focus_edit=False)
+                else:
+                    self.select_step(index, focus_edit=True)
+            else:
+                self.refresh_steps_display()
 
     def save(self):
         name = self.name_entry.get().strip() or "Unnamed"
@@ -648,9 +1257,16 @@ class DarkAgesApp(ctk.CTk):
         self.navigation_frame.grid(row=0, column=0, sticky="nsew")
         self.navigation_frame.grid_rowconfigure(8, weight=1)
 
-        self.navigation_frame_label = ctk.CTkLabel(self.navigation_frame, text="DarkAges Linux Tool", 
+        self.title_container = ctk.CTkFrame(self.navigation_frame, fg_color="transparent")
+        self.title_container.grid(row=0, column=0, padx=20, pady=(20, 15))
+
+        self.navigation_frame_label = ctk.CTkLabel(self.title_container, text="DarkAges Linux Tool", 
                                                  font=ctk.CTkFont(size=15, weight="bold"))
-        self.navigation_frame_label.grid(row=0, column=0, padx=20, pady=20)
+        self.navigation_frame_label.pack()
+
+        self.version_label = ctk.CTkLabel(self.title_container, text="Version 1.5.1",
+                                          font=ctk.CTkFont(size=11), text_color="gray")
+        self.version_label.pack(pady=(2, 0))
 
         self.home_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Home",
                                        fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
@@ -1231,13 +1847,19 @@ class DarkAgesApp(ctk.CTk):
                 steps_label = ctk.CTkLabel(item_frame, text=f"{len(macro['steps'])} steps", text_color="gray")
                 steps_label.pack(side="left", padx=10)
                 
-                delete_btn = ctk.CTkButton(item_frame, text="Del", fg_color="#AA4444", hover_color="#882222", width=40, 
-                                          command=lambda m=macro: self.delete_macro(m))
-                delete_btn.pack(side="right", padx=10, pady=5)
+                delete_btn = tk.Button(
+                    item_frame, text="Del", relief="flat", bd=0, bg="#AA4444", fg="white",
+                    activebackground="#882222", activeforeground="white", font=("Arial", 9, "bold"), width=5,
+                    command=lambda m=macro: self.delete_macro(m)
+                )
+                delete_btn.pack(side="right", padx=6, pady=5)
 
-                edit_btn = ctk.CTkButton(item_frame, text="Edit", width=40, fg_color="#4444AA",
-                                        command=lambda m=macro: self.edit_macro(m))
-                edit_btn.pack(side="right", padx=10, pady=5)
+                edit_btn = tk.Button(
+                    item_frame, text="Edit", relief="flat", bd=0, bg="#4444AA", fg="white",
+                    activebackground="#333388", activeforeground="white", font=("Arial", 9, "bold"), width=5,
+                    command=lambda m=macro: self.edit_macro(m)
+                )
+                edit_btn.pack(side="right", padx=6, pady=5)
 
                 enabled_switch = ctk.CTkSwitch(item_frame, text="", width=40, command=lambda m=macro: self.toggle_macro(m))
                 if macro.get("enabled", True):
