@@ -62,6 +62,7 @@ async def main_async(macro_feature: MacroFeature) -> None:
     tasks: list[asyncio.Future[Any] | Coroutine[Any, Any, Any]] = list(
         input_hub.get_read_tasks()
     )
+    tasks.append(input_hub.hotplug_monitor())
     tasks.append(butterwalk.injection_loop())
     tasks.append(spacebar.injection_loop())
     tasks.append(controller.injection_loop())

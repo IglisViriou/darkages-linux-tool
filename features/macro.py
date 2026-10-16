@@ -38,7 +38,29 @@ _TRIGGER_MAP: dict[str, str] = {
     "dpad_down": "BTN_DPAD_DOWN",
     "dpad_left": "BTN_DPAD_LEFT",
     "dpad_right": "BTN_DPAD_RIGHT",
+    "pad_a": "BTN_SOUTH",
+    "south": "BTN_SOUTH",
+    "pad_b": "BTN_EAST",
+    "east": "BTN_EAST",
+    "pad_x": "BTN_WEST",
+    "west": "BTN_WEST",
+    "pad_y": "BTN_NORTH",
+    "north": "BTN_NORTH",
+    "l1": "BTN_TL",
+    "lb": "BTN_TL",
+    "r1": "BTN_TR",
+    "rb": "BTN_TR",
     "l2": "BTN_L2",
+    "lt": "BTN_L2",
+    "r2": "BTN_R2",
+    "rt": "BTN_R2",
+    "l3": "BTN_THUMBL",
+    "thumbl": "BTN_THUMBL",
+    "r3": "BTN_THUMBR",
+    "thumbr": "BTN_THUMBR",
+    "select": "BTN_SELECT",
+    "start": "BTN_START",
+    "mode": "BTN_MODE",
     "grave": "KEY_GRAVE",
     "tilde": "KEY_GRAVE",
     "`": "KEY_GRAVE",
@@ -162,18 +184,42 @@ class MacroFeature:
         self._delay_buf: str = str(DEFAULT_STEP_DELAY)
         self._seq_focus: bool = True  # True = sequence field, False = delay field
         self._error: str = ""
+        from features import controller
+        controller.set_macro_runner(self.trigger_macro)
+
+    def trigger_macro(self, macro: Macro | dict[str, Any]) -> None:
+        if macro.get("kind") == "keybind" and macro.get("steps"):
+            try:
+                asyncio.get_running_loop().create_task(injector.key(macro["steps"][0]["value"]))
+            except RuntimeError:
+                pass
+            return
+
+        mid = macro["id"]
+        if mid not in state["macro_playing"]:
+            state["macro_playing"].add(mid)
+            try:
+                _ = asyncio.get_running_loop().create_task(
+                    self._play_macro(macro)  # type: ignore[arg-type]
+                )
+            except RuntimeError:
+                state["macro_playing"].discard(mid)
     
     async def hold_loop(self) -> None:
         """Background loop to handle 'hold' mode macros."""
+        from features import controller
         while state["running"]:
             if state["active"] and state["physical_keys_down"]:
                 for macro in state["macros"]:
+                    trig = macro.get("trigger", "")
                     if (
                         macro.get("enabled", True)
                         and macro.get("trigger_mode") == "hold"
-                        and macro["trigger"] in state["physical_keys_down"]
+                        and trig in state["physical_keys_down"]
                         and macro["id"] not in state["macro_playing"]
                     ):
+                        if controller.should_suppress_macro_for_controller(trig):
+                            continue
                         state["macro_playing"].add(macro["id"])
                         try:
                             _ = asyncio.get_running_loop().create_task(
@@ -202,6 +248,9 @@ class MacroFeature:
             return
 
         if state["active"] and event.value == 1:
+            from features import controller
+            if controller.should_suppress_macro_for_controller(key_name):
+                return
             for macro in state["macros"]:
                 if (
                     macro.get("enabled", True)
@@ -212,21 +261,7 @@ class MacroFeature:
                     if macro.get("trigger_mode", "once") == "hold":
                         continue
 
-                    if macro.get("kind") == "keybind" and macro["steps"]:
-                        # Direct injection for stability
-                        try:
-                            asyncio.get_running_loop().create_task(injector.key(macro["steps"][0]["value"]))
-                        except RuntimeError:
-                            pass
-                        continue
-
-                    state["macro_playing"].add(macro["id"])
-                    try:
-                        _ = asyncio.get_running_loop().create_task(
-                            self._play_macro(macro)
-                        )
-                    except RuntimeError:
-                        state["macro_playing"].discard(macro["id"])
+                    self.trigger_macro(macro)
 
     async def _play_macro(self, macro: Macro) -> None:
         # Cancel any other interruptible macros

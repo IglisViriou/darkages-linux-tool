@@ -298,133 +298,183 @@ def _handle_spacebar_input(ch: int) -> None:
         state["listening_for_hotkey"] = None
 
 
+_TUI_CTRL_INDEX = 0
+_TUI_CTRL_LAYER = "base"
+
+
+def _get_flat_controller_inputs() -> list[tuple[str, str]]:
+    from features.controller import CONTROLLER_GROUPS
+    items: list[tuple[str, str]] = []
+    for _, group_items in CONTROLLER_GROUPS:
+        items.extend(group_items)
+    return items
+
+
 def _draw_controller(canvas: Canvas, top: int) -> None:
+    import input_hub
+    from features.controller import format_binding, is_layer_active
+
+    # Process captured controller output key if recorded in TUI
+    captured = state.get("captured_hotkey")
+    if captured and captured[0] == "controller_output":
+        _, combo = captured
+        state["captured_hotkey"] = None
+        flat = _get_flat_controller_inputs()
+        if 0 <= _TUI_CTRL_INDEX < len(flat):
+            inp_code = flat[_TUI_CTRL_INDEX][0]
+            bmap_key = "controller_layer_bindings" if _TUI_CTRL_LAYER == "layer" else "controller_bindings"
+            state[bmap_key][inp_code] = {"type": "key", "value": combo}
+            from state import save_config
+            save_config()
+
     row = top + 1
+    ctrl_count = input_hub.get_controller_count()
+    ctrl_names = input_hub.get_controller_names()
+    dev_str = f"  ({ctrl_count} pad: {', '.join(ctrl_names[:1])})" if ctrl_count > 0 else "  (no pad detected)"
     _field(
         canvas,
         row,
         "Controller",
         *_pill(state["controller_enabled"]),
         ("  [c]", theme.muted()),
+        (dev_str, theme.success() if ctrl_count > 0 else theme.muted()),
     )
-    row += 2
+    row += 1
 
-    if state["dpad_enabled"]:
-        _field(
-            canvas,
-            row,
-            "DPAD",
-            ("● ", theme.success(bold=True)),
-            ("enabled", theme.success(bold=True)),
-            ("  [d]", theme.muted()),
-        )
-    else:
-        _field(
-            canvas,
-            row,
-            "DPAD",
-            ("○ ", theme.muted(bold=True)),
-            ("disabled", theme.muted()),
-            ("  [d]", theme.muted()),
-        )
-    row += 2
-
-    if state["joystick_enabled"]:
-        _field(
-            canvas,
-            row,
-            "Left Stick",
-            ("● ", theme.success(bold=True)),
-            ("enabled", theme.success(bold=True)),
-            ("  [j]", theme.muted()),
-        )
-    else:
-        _field(
-            canvas,
-            row,
-            "Left Stick",
-            ("○ ", theme.muted(bold=True)),
-            ("disabled", theme.muted()),
-            ("  [j]", theme.muted()),
-        )
-    row += 2
-
-    if state["right_stick_mouse_enabled"]:
-        _field(
-            canvas,
-            row,
-            "RS Mouse",
-            ("● ", theme.success(bold=True)),
-            ("enabled", theme.success(bold=True)),
-            ("  [r]", theme.muted()),
-        )
-    else:
-        _field(
-            canvas,
-            row,
-            "RS Mouse",
-            ("○ ", theme.muted(bold=True)),
-            ("disabled", theme.muted()),
-            ("  [r]", theme.muted()),
-        )
-    row += 2
-
+    dpad_chunk = ("enabled [d]", theme.success(bold=True)) if state["dpad_enabled"] else ("disabled [d]", theme.muted())
+    ls_chunk = (f"enabled ({state.get('left_stick_deadzone', 25)}%) [j]", theme.success(bold=True)) if state["joystick_enabled"] else ("disabled [j]", theme.muted())
+    rs_chunk = (f"enabled ({state['mouse_sensitivity']}% / DZ {state.get('right_stick_deadzone', 12)}%) [r]", theme.success(bold=True)) if state["right_stick_mouse_enabled"] else ("disabled [r]", theme.muted())
     _field(
         canvas,
         row,
-        "Sensitivity",
-        (f"{state['mouse_sensitivity']}%", theme.warn(bold=True)),
-        (f" of {state['mouse_dpi']} DPI", theme.muted()),
-        ("  [[/]]", theme.muted()),
+        "Inputs",
+        ("DPAD: ", theme.muted()), dpad_chunk,
+        ("  ·  LS: ", theme.muted()), ls_chunk,
+        ("  ·  RS Mouse: ", theme.muted()), rs_chunk,
+        ("  [[/]] sens", theme.muted()),
     )
-    row += 2
+    row += 1
 
-    bind_hint = "  (PRESS KEYS...)" if state.get("listening_for_hotkey") == "controller" else "  [k]"
+    bind_hint = " (PRESS KEYS...)" if state.get("listening_for_hotkey") == "controller" else " [k]"
     _field(
         canvas,
         row,
         "Hotkey",
         (state["controller_hotkey"], theme.accent(bold=True)),
         (bind_hint, theme.warn() if state.get("listening_for_hotkey") == "controller" else theme.muted()),
+        ("  ·  Presets: [p] Dark Ages Default  [m] Movement Only", theme.muted()),
+    )
+    row += 1
+
+    layer_str = "BASE LAYER" if _TUI_CTRL_LAYER == "base" else "MODIFIER LAYER (CHORD)"
+    live_layer = "  [MODIFIER HELD]" if is_layer_active() else ""
+    _field(
+        canvas,
+        row,
+        "Edit Layer",
+        (layer_str, theme.warn(bold=True) if _TUI_CTRL_LAYER == "layer" else theme.accent(bold=True)),
+        ("  [l] toggle layer  ·  [↑/↓] select  ·  [Enter] bind key  ·  [b] cycle mouse/layer  ·  [u] unbind", theme.muted()),
+        (live_layer, theme.success(bold=True)),
     )
     row += 2
 
-    keys = ", ".join(k.replace("KEY_", "") for k in list(state["physical_keys_down"])) or "—"
-    rx, ry = state.get("right_stick_x", 0.0), state.get("right_stick_y", 0.0)
-    stick_info = f" | RS: ({rx:+.2f}, {ry:+.2f})" if (rx != 0.0 or ry != 0.0) else ""
-    _field(canvas, row, "Input", (f"{keys}{stick_info}", curses.A_BOLD))
+    flat = _get_flat_controller_inputs()
+    bmap = state.get("controller_layer_bindings" if _TUI_CTRL_LAYER == "layer" else "controller_bindings", {})
+    max_rows = max(3, canvas.h - row - 2)
+    start_idx = max(0, min(_TUI_CTRL_INDEX - max_rows // 2, len(flat) - max_rows))
+    visible = flat[start_idx : start_idx + max_rows]
+
+    for idx_offset, (inp_code, inp_label) in enumerate(visible):
+        actual_idx = start_idx + idx_offset
+        is_sel = actual_idx == _TUI_CTRL_INDEX
+        binding = bmap.get(inp_code)
+        b_text = format_binding(binding)
+        is_Wait = is_sel and state.get("listening_for_hotkey") == "controller_output"
+        if is_Wait:
+            b_text = "PRESS KEY COMBO..."
+        prefix = "▸ " if is_sel else "  "
+        _ = canvas.line(
+            row,
+            4,
+            (prefix, theme.accent(bold=True) if is_sel else theme.muted()),
+            (f"{inp_label:<28}", curses.A_BOLD if is_sel else theme.muted()),
+            (b_text, theme.warn(bold=True) if is_Wait else (theme.accent(bold=True) if binding and binding.get("type", "none") != "none" else theme.muted())),
+        )
+        row += 1
 
 
 def _handle_controller_input(ch: int) -> None:
+    global _TUI_CTRL_INDEX, _TUI_CTRL_LAYER
+    from state import save_config, get_default_controller_bindings, get_default_layer_bindings, get_minimal_controller_bindings
+
+    flat = _get_flat_controller_inputs()
+    bmap_key = "controller_layer_bindings" if _TUI_CTRL_LAYER == "layer" else "controller_bindings"
+
+    if ch == 27 and state.get("listening_for_hotkey") in ("controller", "controller_output"):
+        state["listening_for_hotkey"] = None
+        return
+
     if ch in (ord("c"), ord("C")):
         state["controller_enabled"] = not state["controller_enabled"]
-        from state import save_config
         save_config()
     elif ch in (ord("d"), ord("D")):
         state["dpad_enabled"] = not state["dpad_enabled"]
-        from state import save_config
         save_config()
     elif ch in (ord("j"), ord("J")):
         state["joystick_enabled"] = not state["joystick_enabled"]
-        from state import save_config
         save_config()
     elif ch in (ord("r"), ord("R")):
         state["right_stick_mouse_enabled"] = not state["right_stick_mouse_enabled"]
-        from state import save_config
         save_config()
     elif ch == ord("["):
         state["mouse_sensitivity"] = max(1, state["mouse_sensitivity"] - 5)
-        from state import save_config
         save_config()
     elif ch == ord("]"):
         state["mouse_sensitivity"] = min(100, state["mouse_sensitivity"] + 5)
-        from state import save_config
         save_config()
     elif ch in (ord("k"), ord("K")):
         state["listening_for_hotkey"] = "controller"
         state["last_event"] = "Press keys to bind Controller hotkey..."
-    elif ch == 27 and state.get("listening_for_hotkey") == "controller":
-        state["listening_for_hotkey"] = None
+    elif ch in (ord("l"), ord("L")):
+        _TUI_CTRL_LAYER = "layer" if _TUI_CTRL_LAYER == "base" else "base"
+    elif ch in (ord("p"), ord("P")):
+        state["controller_bindings"] = get_default_controller_bindings()
+        state["controller_layer_bindings"] = get_default_layer_bindings()
+        save_config()
+    elif ch in (ord("m"), ord("M")):
+        state["controller_bindings"] = get_minimal_controller_bindings()
+        state["controller_layer_bindings"] = {}
+        save_config()
+    elif ch == curses.KEY_UP:
+        _TUI_CTRL_INDEX = max(0, _TUI_CTRL_INDEX - 1)
+    elif ch == curses.KEY_DOWN:
+        _TUI_CTRL_INDEX = min(len(flat) - 1, _TUI_CTRL_INDEX + 1)
+    elif ch in (10, 13, curses.KEY_ENTER):
+        state["listening_for_hotkey"] = "controller_output"
+    elif ch in (ord("u"), ord("U")):
+        if 0 <= _TUI_CTRL_INDEX < len(flat):
+            inp_code = flat[_TUI_CTRL_INDEX][0]
+            state[bmap_key][inp_code] = {"type": "none", "value": ""}
+            save_config()
+    elif ch in (ord("b"), ord("B")):
+        if 0 <= _TUI_CTRL_INDEX < len(flat):
+            inp_code = flat[_TUI_CTRL_INDEX][0]
+            cycle = [
+                {"type": "mouse", "value": "left"},
+                {"type": "mouse", "value": "right"},
+                {"type": "mouse", "value": "middle"},
+                {"type": "mouse", "value": "scroll_up"},
+                {"type": "mouse", "value": "scroll_down"},
+                {"type": "layer_hold", "value": "1"},
+            ]
+            curr = state[bmap_key].get(inp_code, {"type": "none", "value": ""})
+            next_b = cycle[0]
+            for i, item in enumerate(cycle):
+                if item.get("type") == curr.get("type") and item.get("value") == curr.get("value"):
+                    next_b = cycle[(i + 1) % len(cycle)]
+                    break
+            state[bmap_key][inp_code] = next_b
+            save_config()
 
 
 def _draw_autofollowing(canvas: Canvas, top: int) -> None:

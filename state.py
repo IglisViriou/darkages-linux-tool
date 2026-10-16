@@ -15,6 +15,94 @@ DEFAULT_LOOP_INTERVAL: float = 0.01
 DEFAULT_DARKAGES_WINDOW_NAMES: str = "Unora"
 
 
+class ControllerBinding(TypedDict):
+    kind: Literal["none", "key", "mouse", "layer_hold", "macro"]
+    value: str
+
+
+def get_default_controller_bindings() -> dict[str, ControllerBinding]:
+    return {
+        # Left Stick
+        "BTN_JOY_LY_NEG": {"kind": "key", "value": "Up"},
+        "BTN_JOY_LY_POS": {"kind": "key", "value": "Down"},
+        "BTN_JOY_LX_NEG": {"kind": "key", "value": "Left"},
+        "BTN_JOY_LX_POS": {"kind": "key", "value": "Right"},
+        # DPAD
+        "BTN_DPAD_UP": {"kind": "key", "value": "Up"},
+        "BTN_DPAD_DOWN": {"kind": "key", "value": "Down"},
+        "BTN_DPAD_LEFT": {"kind": "key", "value": "Left"},
+        "BTN_DPAD_RIGHT": {"kind": "key", "value": "Right"},
+        # Stick Clicks
+        "BTN_THUMBL": {"kind": "none", "value": ""},
+        "BTN_THUMBR": {"kind": "mouse", "value": "middle_click"},
+        # Face Buttons
+        "BTN_SOUTH": {"kind": "mouse", "value": "left_click"},
+        "BTN_EAST": {"kind": "mouse", "value": "right_click"},
+        "BTN_WEST": {"kind": "key", "value": "space"},
+        "BTN_NORTH": {"kind": "key", "value": "Tab"},
+        # Bumpers & Triggers
+        "BTN_TL": {"kind": "layer_hold", "value": "modifier_layer"},
+        "BTN_TR": {"kind": "key", "value": "Escape"},
+        "BTN_L2": {"kind": "mouse", "value": "right_click"},
+        "BTN_R2": {"kind": "mouse", "value": "left_click"},
+        # Center Buttons
+        "BTN_SELECT": {"kind": "key", "value": "Escape"},
+        "BTN_START": {"kind": "key", "value": "Return"},
+        "BTN_MODE": {"kind": "none", "value": ""},
+        # Right Stick Directions (used when Right Stick Mouse Control is off)
+        "BTN_JOY_RY_NEG": {"kind": "none", "value": ""},
+        "BTN_JOY_RY_POS": {"kind": "none", "value": ""},
+        "BTN_JOY_RX_NEG": {"kind": "none", "value": ""},
+        "BTN_JOY_RX_POS": {"kind": "none", "value": ""},
+    }
+
+
+def get_minimal_controller_bindings() -> dict[str, ControllerBinding]:
+    bindings = {k: {"kind": "none", "value": ""} for k in get_default_controller_bindings()}
+    bindings["BTN_JOY_LY_NEG"] = {"kind": "key", "value": "Up"}
+    bindings["BTN_JOY_LY_POS"] = {"kind": "key", "value": "Down"}
+    bindings["BTN_JOY_LX_NEG"] = {"kind": "key", "value": "Left"}
+    bindings["BTN_JOY_LX_POS"] = {"kind": "key", "value": "Right"}
+    bindings["BTN_DPAD_UP"] = {"kind": "key", "value": "Up"}
+    bindings["BTN_DPAD_DOWN"] = {"kind": "key", "value": "Down"}
+    bindings["BTN_DPAD_LEFT"] = {"kind": "key", "value": "Left"}
+    bindings["BTN_DPAD_RIGHT"] = {"kind": "key", "value": "Right"}
+    return bindings
+
+
+def get_default_layer_bindings() -> dict[str, ControllerBinding]:
+    bindings: dict[str, ControllerBinding] = {
+        k: {"kind": "none", "value": ""} for k in get_default_controller_bindings()
+    }
+    bindings["BTN_SOUTH"] = {"kind": "key", "value": "F1"}
+    bindings["BTN_EAST"] = {"kind": "key", "value": "F2"}
+    bindings["BTN_WEST"] = {"kind": "key", "value": "F3"}
+    bindings["BTN_NORTH"] = {"kind": "key", "value": "F4"}
+    bindings["BTN_DPAD_UP"] = {"kind": "key", "value": "1"}
+    bindings["BTN_DPAD_RIGHT"] = {"kind": "key", "value": "2"}
+    bindings["BTN_DPAD_DOWN"] = {"kind": "key", "value": "3"}
+    bindings["BTN_DPAD_LEFT"] = {"kind": "key", "value": "4"}
+    bindings["BTN_TR"] = {"kind": "key", "value": "F5"}
+    bindings["BTN_L2"] = {"kind": "key", "value": "F6"}
+    bindings["BTN_R2"] = {"kind": "key", "value": "F7"}
+    bindings["BTN_START"] = {"kind": "key", "value": "F8"}
+    return bindings
+
+
+def _merge_bindings(
+    defaults: dict[str, ControllerBinding],
+    loaded: dict[str, Any] | None,
+) -> dict[str, ControllerBinding]:
+    merged: dict[str, ControllerBinding] = {
+        k: {"kind": v["kind"], "value": v["value"]} for k, v in defaults.items()
+    }
+    if isinstance(loaded, dict):
+        for k, v in loaded.items():
+            if isinstance(v, dict) and "kind" in v and "value" in v:
+                merged[k] = {"kind": v["kind"], "value": str(v["value"])}
+    return merged
+
+
 def save_config() -> None:
     try:
         os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -27,6 +115,10 @@ def save_config() -> None:
             "right_stick_mouse_enabled": state["right_stick_mouse_enabled"],
             "mouse_sensitivity": state["mouse_sensitivity"],
             "mouse_dpi": state["mouse_dpi"],
+            "left_stick_deadzone": state["left_stick_deadzone"],
+            "right_stick_deadzone": state["right_stick_deadzone"],
+            "controller_bindings": state["controller_bindings"],
+            "controller_layer_bindings": state["controller_layer_bindings"],
             "space_enabled": state["space_enabled"],
             "space_multiplier": state["space_multiplier"],
             "space_delay_ms": state["space_delay_ms"],
@@ -59,8 +151,6 @@ class MacroStep(TypedDict):
     y: int | None
 
 
-
-
 class Macro(TypedDict):
     id: str
     name: str
@@ -91,8 +181,15 @@ class State(TypedDict):
     right_stick_mouse_enabled: bool
     mouse_sensitivity: int
     mouse_dpi: int
+    left_stick_deadzone: int
+    right_stick_deadzone: int
     right_stick_x: float
     right_stick_y: float
+    controller_bindings: dict[str, ControllerBinding]
+    controller_layer_bindings: dict[str, ControllerBinding]
+    last_controller_input: str | None
+    listening_for_controller_input: bool
+    captured_controller_input: str | None
     # spacebar uninterrupted repeat
     space_enabled: bool
     space_multiplier: int
@@ -141,8 +238,15 @@ state: State = {
     "right_stick_mouse_enabled": loaded_config.get("right_stick_mouse_enabled", False),
     "mouse_sensitivity": loaded_config.get("mouse_sensitivity", 50),
     "mouse_dpi": loaded_config.get("mouse_dpi", 1600),
+    "left_stick_deadzone": loaded_config.get("left_stick_deadzone", 12),
+    "right_stick_deadzone": loaded_config.get("right_stick_deadzone", 12),
     "right_stick_x": 0.0,
     "right_stick_y": 0.0,
+    "controller_bindings": _merge_bindings(get_default_controller_bindings(), loaded_config.get("controller_bindings")),
+    "controller_layer_bindings": _merge_bindings(get_default_layer_bindings(), loaded_config.get("controller_layer_bindings")),
+    "last_controller_input": None,
+    "listening_for_controller_input": False,
+    "captured_controller_input": None,
     "space_enabled": loaded_config.get("space_enabled", False),
     "space_multiplier": loaded_config.get("space_multiplier", 1),
     "space_delay_ms": loaded_config.get("space_delay_ms", 10),
@@ -154,6 +258,7 @@ state: State = {
     "macros": [],
     "macro_playing": set(),
     "active_macro_tasks": {},
+    "macros_holding": set(),
     "recording_mouse": False,
     "recording_start_time": 0.0,
     "captured_click": None,

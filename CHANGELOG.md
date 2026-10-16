@@ -5,6 +5,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) 
 
 ---
 
+## [1.4] - 2026-10-16
+
+### Features
+* **Full Native Controller Mapping (Zero External Dependencies)**:
+  * **Canonical Gamepad Input Layer (`input_hub.py`)**: Normalized all gamepad inputs across Xbox, PlayStation, Switch, and generic `evdev` controllers into canonical tokens (`BTN_SOUTH`, `BTN_EAST`, `BTN_WEST`, `BTN_NORTH`, `BTN_TL`, `BTN_TR`, `BTN_L2`, `BTN_R2`, `BTN_SELECT`, `BTN_START`, `BTN_MODE`, `BTN_THUMBL`, `BTN_THUMBR`, `BTN_DPAD_*`, and `BTN_JOY_*`), including analog trigger thresholding (`ABS_Z`/`ABS_RZ`/`ABS_GAS`/`ABS_BRAKE`) with hysteresis and hardware `AbsInfo` calibration.
+  * **Configurable Controller Binding Engine (`features/controller.py`, `injector.py`, `state.py`)**: Every controller input can now be bound to a **Keyboard Key / Combo** (`key_down`/`key_up` hold & release, with automatic Butterwalk pulsing on directional arrows and Continuous Assail pulsing on `space`), **Mouse Action** (Left/Right/Middle hold & release or continuous Scroll Wheel Up/Down via `REL_WHEEL` / `xdotool`), **Modifier Layer Hold (Chord)** (`layer_hold`), **Macro Execution**, or **Unbound**.
+  * **Modifier Layer (Chord) Support**: Holding any button bound to `Modifier Layer (Hold)` dynamically switches active controller inputs to a secondary binding map (`controller_layer_bindings`), enabling full hotbar (`1`–`0`) and function key (`F1`–`F12`) access on a standard gamepad with clean state release on chord transitions.
+  * **Automatic Controller Hotplugging & Device Classification**: Separated `_controllers` from `_keyboards` and `_mice` in `input_hub.py` and added a background `hotplug_monitor()` coroutine that automatically attaches newly connected USB/Bluetooth controllers and cleans up disconnected devices without restarting DALT.
+  * **Interactive Visual Controller Remapper (`gui/app.py` & `ui/tabs.py`)**: Rebuilt the Controller Inputs tab with a single-canvas interactive 2D gamepad diagram and callout badge mapper (supporting left-click to select/configure, right-click to unbind, live green button/direction press highlights, and a live Right Analog Stick position indicator), alongside connected controller status, independent Left/Right Stick deadzone sliders, Base vs. Modifier Layer switcher, interactive `"Press Pad Input to Select"` hardware detector, inline binding editor, and built-in presets (*Dark Ages Default* and *Movement Only*).
+
+### Bug Fixes
+* **Controller Directional Inputs Using Butterwalk When Disabled**:
+  * Fixed an issue where holding a direction on the analog stick or DPAD continuously spammed rapid tap-and-release pulses (`injector.key()`) even when Butterwalk was turned off.
+  * Added `injector.key_down()` and `injector.key_up()` (`uinput` with `xdotool keydown`/`keyup` fallback) so controller directional inputs press and hold the corresponding arrow key continuously when Butterwalk is disabled, matching physical arrow key behavior.
+  * Ensured held virtual directional keys are cleanly released when returning the stick/DPAD to neutral, toggling Butterwalk on, disabling controller mapping, losing client window focus, or exiting the application.
+  * Updated controller Butterwalk pulsing when enabled to respect the configured `butterwalk_delay_ms` repeat speed without stalling Right Analog Stick mouse cursor movement.
+* **DPAD Hat State Transitions**:
+  * Fixed `ABS_HAT0X` and `ABS_HAT0Y` event handling in `input_hub.py` so direct opposite-axis transitions (`-1 ↔ 1`) always release the previous DPAD direction before pressing the new one.
+* **Macro Editor Step Stack Scrolling & Dynamic Warning Wrapping**:
+  * Fixed `_on_linux_mousewheel` in `gui/app.py` to resolve the innermost `CTkScrollableFrame` under the mouse cursor rather than matching the first outer ancestor in registration order, allowing the Macro Stack step list (and nested scrollable frames) to scroll independently when hovered instead of scrolling the entire Macro Editor window.
+  * Added debounced dynamic text wrapping to the Macro Editor timing warning so long text wraps cleanly as the window is resized without causing `<Configure>` layout feedback freezes.
+
+### Tweaks and Optimizations
+* Added more detail to the innate delays DALT uses for macros when there are no manual delays inserted.
+* **Native Tkinter Widget Standardization**: Converted `CTkFrame`, `CTkLabel`, `CTkButton`, and `CTkFont` widgets across `gui/app.py` to standard `tk.Frame`, `tk.Label`, and `tk.Button` widgets for uniform button styling and zero CustomTkinter canvas-redraw overhead.
+* **Single-Canvas Visual Controller Mapper**: Replaced the 25-row multi-widget controller binding list (125+ X11 sub-windows) with a single native `tk.Canvas` interactive gamepad diagram, cutting first-open Controller tab load time by ~65% while providing real-time input highlights.
+* **Macro Editor Instance & Step Row Pooling**: Cached the `MacroEditor` window instance (`withdraw()`/`deiconify()`) and pooled step row widgets in `refresh_steps_display()`, reducing subsequent Macro Editor open times from ~1.25s to ~2ms and step edits to <5ms.
+* **Targeted Macro Card Updates & Lazy Tab Loading**: Updated `save_edited_macro` and `delete_macro` to mutate or remove individual macro cards in place rather than rebuilding the full list, and deferred non-home tab widget construction until first visited.
+* **Dirty-Checked GUI Polling (`update_gui`)**: Added state caching (`_gui_cache`) to `update_gui()` so labels, switches, sliders, and canvas indicators only reconfigure when their underlying values change.
+* **Autofollowing Tab Clarification**: Added explicit clarification under the Autofollowing tab explaining that DALT is designed strictly for active windows (requiring held hotkeys to loop macros and excluding autofollowing).
+
+---
+
 ## [1.3.1] - 2026-10-13
 
 ### Added

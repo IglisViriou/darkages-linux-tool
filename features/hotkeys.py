@@ -270,10 +270,14 @@ def on_key_event(event: InputEvent, key_name: str) -> bool:
     if target:
         if key_name in ("BTN_LEFT", "CODE_272"):
             return False
+        if target == "controller_output" and key_name.startswith("BTN_"):
+            return False
 
         if event.value == 1:
             if key_name not in ALL_MODIFIER_KEYS:
                 combo = format_hotkey_from_keys(state["physical_keys_down"], key_name)
+                if target in ("butterwalk", "space", "controller"):
+                    state[f"{target}_hotkey"] = combo
                 state["captured_hotkey"] = (target, combo)
                 state["listening_for_hotkey"] = None
                 state["last_event"] = f"Bound {target} to {combo}"
@@ -282,6 +286,8 @@ def on_key_event(event: InputEvent, key_name: str) -> bool:
         elif event.value == 0:
             if key_name in ALL_MODIFIER_KEYS and len(state["physical_keys_down"]) <= 1:
                 mod_name = REVERSE_KEY_MAP.get(key_name, "ctrl")
+                if target in ("butterwalk", "space", "controller"):
+                    state[f"{target}_hotkey"] = mod_name
                 state["captured_hotkey"] = (target, mod_name)
                 state["listening_for_hotkey"] = None
                 state["last_event"] = f"Bound {target} to {mod_name}"
